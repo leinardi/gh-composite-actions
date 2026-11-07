@@ -1,0 +1,40 @@
+name: Set up svu
+description: >-
+  Installs svu, the semantic version utility that derives the next version from Conventional
+  Commits, from its GitHub release archive checked against a pinned SHA-256. It goes into
+  RUNNER_TEMP and onto PATH for the rest of the job: no sudo, no Go toolchain. Linux X64 and
+  ARM64 runners.
+
+inputs:
+  version:
+    description: >-
+      The svu version, X.Y.Z or vX.Y.Z. Empty: the version pinned in this action (3.4.1), with
+      its pinned checksums. Any other version needs `sha256` too.
+    required: false
+    default: ""
+  sha256:
+    description: >-
+      The SHA-256 of svu_<version>_linux_<amd64|arm64>.tar.gz for the runner's architecture, from
+      the release's checksums.txt. Required with a `version` other than the pinned one.
+    required: false
+    default: ""
+
+outputs:
+  path:
+    description: "The directory holding the svu binary, as added to PATH"
+    value: ${{ steps.install.outputs.path }}
+
+runs:
+  using: "composite"
+  steps:
+    # The pinned version and checksums live in setup-svu.sh, next to its tests; the inputs are
+    # passed through env, never interpolated into the shell.
+    - name: Install svu
+      id: install
+      shell: bash
+      env:
+        SVU_VERSION: ${{ inputs.version }}
+        SVU_SHA256: ${{ inputs.sha256 }}
+      run: |
+        set -euo pipefail
+        "${GITHUB_ACTION_PATH}/setup-svu.sh"
