@@ -149,7 +149,15 @@ run_script() {
 	: >"$OUT_FILE"
 	local path="$WORK/svu-bin:$BASE_PATH"
 	if [[ "${SVU_ON_PATH:-true}" != "true" ]]; then
-		path="$BASE_PATH"
+		# Drop every PATH entry holding an svu, not only the stub's: in CI, setup-svu puts the
+		# real one on PATH for the real-svu run.
+		path=""
+		local dir
+		while IFS= read -r -d: dir; do
+			if [[ -n "$dir" && ! -x "$dir/svu" ]]; then
+				path="${path:+$path:}$dir"
+			fi
+		done <<<"$BASE_PATH:"
 	fi
 	STATUS=0
 	LOG=$(cd "$REPO" && env PATH="$path" GITHUB_OUTPUT="$OUT_FILE" "$@" bash "$SCRIPT" 2>&1) || STATUS=$?
