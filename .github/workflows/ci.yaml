@@ -9,9 +9,11 @@ on:
       - main
   workflow_dispatch:
 
+# A newer push to a pull request cancels the older run. A push to main never cancels one: every
+# main commit keeps its own ci-result, which require-ci-green looks up per SHA.
 concurrency:
   group: "${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}"
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Every job reads the repository and nothing else, unless it says otherwise below.
 permissions:
@@ -355,7 +357,7 @@ jobs:
 
   self-test-require-ci-green:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 35
     # actions: read lists the workflow runs and their jobs.
     permissions:
       contents: read
@@ -390,6 +392,18 @@ jobs:
         run: |
           set -euo pipefail
           test "${NONE} ${BAD}" = "failure failure"
+
+      # The positive path, on a push to main only: the previous main commit had its own push run of
+      # this workflow (main runs are never cancelled), so its ci-result must pass the gate.
+      - name: The previous main commit's CI passes the gate
+        if: >-
+          github.event_name == 'push'
+          && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+          && github.event.before != '0000000000000000000000000000000000000000'
+        uses: ./require-ci-green
+        with:
+          sha: ${{ github.event.before }}
+          timeout: "30"
 
   self-test-binary-attestation-status:
     runs-on: ubuntu-latest
