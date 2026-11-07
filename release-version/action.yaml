@@ -1,0 +1,63 @@
+name: Release version
+description: >-
+  Resolves the version and tag to release, explicit or derived by svu from the Conventional
+  Commits since the last release tag, and checks that it may be released: a strict
+  <prefix>X.Y.Z tag, higher than every release already tagged (except a re-run whose tag is
+  already on HEAD), and not lower than an optional floor version. Needs a checkout with the full
+  history and every tag, and svu on PATH when no version is given (run setup-svu first).
+
+inputs:
+  version:
+    description: >-
+      The version to release: X.Y.Z, vX.Y.Z or <tag-prefix>X.Y.Z. Empty: derive it from the
+      commits since the last release tag with svu.
+    required: false
+    default: ""
+  tag-prefix:
+    description: >-
+      The text before X.Y.Z in a release tag: `v` for vX.Y.Z, `<plugin>--v` for a plugin tagged
+      <plugin>--vX.Y.Z. Letters, digits and `.`, `_`, `/`, `-` only.
+    required: false
+    default: "v"
+  floor-version:
+    description: >-
+      The lowest version that may be released, X.Y.Z or vX.Y.Z, such as the version a manifest
+      already carries. A lower version, explicit or derived, fails. Empty: no floor.
+    required: false
+    default: ""
+
+outputs:
+  version:
+    description: "The resolved version, X.Y.Z with no prefix"
+    value: ${{ steps.resolve.outputs.version }}
+  tag:
+    description: "The release tag, <tag-prefix>X.Y.Z"
+    value: ${{ steps.resolve.outputs.tag }}
+  previous:
+    description: "The highest release tag before this one in this branch's history, or empty"
+    value: ${{ steps.resolve.outputs.previous }}
+  explicit:
+    description: "true when the version input was given, false when it was derived"
+    value: ${{ steps.resolve.outputs.explicit }}
+  recovery:
+    description: "true when the tag already points at HEAD: a re-run of a release that failed after creating it"
+    value: ${{ steps.resolve.outputs.recovery }}
+  major:
+    description: "The moving major tag, <tag-prefix>MAJOR (v1, <plugin>--v1)"
+    value: ${{ steps.resolve.outputs.major }}
+
+runs:
+  using: "composite"
+  steps:
+    # The logic lives in release-version.sh, with table tests next to it; the step only passes
+    # the inputs through env, so no input is ever interpolated into the shell.
+    - name: Resolve the version to release
+      id: resolve
+      shell: bash
+      env:
+        INPUT_VERSION: ${{ inputs.version }}
+        TAG_PREFIX: ${{ inputs.tag-prefix }}
+        FLOOR_VERSION: ${{ inputs.floor-version }}
+      run: |
+        set -euo pipefail
+        "${GITHUB_ACTION_PATH}/release-version.sh"

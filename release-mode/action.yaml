@@ -1,0 +1,199 @@
+name: Release mode
+description: >-
+  Decides, before anything is built or pushed, whether a release run is fresh, publishes a version
+  whose tag already exists, reuses what is already published, or stops. It verifies every published
+  image and release asset against the signer workflow, decides per binary and platform whether the
+  binary comes from the published image, the published asset or a rebuild, fetches the published
+  binaries, and writes the decision as step outputs and a JSON plan. It never publishes anything.
+
+inputs:
+  tag:
+    description: The git tag being released, e.g. v1.2.3.
+    required: true
+  platforms:
+    description: The shipped platforms, separated by commas or whitespace, e.g. linux/amd64,linux/arm64.
+    required: true
+  image:
+    description: >-
+      The image, without tag or digest (e.g. ghcr.io/owner/name), holding every binary in binaries.
+      Leave empty when images is used, or when the release ships no image.
+    required: false
+    default: ""
+  images:
+    description: >-
+      Instead of image, one image per line: "<ref> [binary[=/path/in/image]]...", naming the binaries
+      each image holds. One binary may sit in several images.
+    required: false
+    default: ""
+  binaries:
+    description: >-
+      The release binaries, separated by commas or whitespace. Empty for a release that ships only an
+      image.
+    required: false
+    default: ""
+  image-binary-paths:
+    description: >-
+      One "<binary>=/path/in/image" per line, for binaries that are not at /usr/local/bin/<binary>.
+    required: false
+    default: ""
+  asset-pattern:
+    description: >-
+      The release asset name of a binary on a platform. {binary}, {os} and {arch} are replaced, and
+      {variant} becomes "-<variant>" or nothing.
+    required: false
+    default: "{binary}-{os}-{arch}{variant}"
+  checksums-name:
+    description: The checksums asset published beside the binaries (unused when binaries is empty).
+    required: false
+    default: checksums.txt
+  image-tag:
+    description: The image tag of the version, when it differs from the git tag (e.g. 1.2.3 for v1.2.3).
+    required: false
+    default: ""
+  tag-regex:
+    description: The extended regular expression every release tag matches.
+    required: false
+    default: '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+  expected-toolchains:
+    description: >-
+      "Name: version" lines, one per line, that the annotation of an existing tag must carry exactly,
+      e.g. the toolchains this job builds with after recovering the tag's.
+    required: false
+    default: ""
+  required-results:
+    description: >-
+      Job results that must all be success before anything may happen, separated by whitespace, such
+      as the result of the audit job (needs.audit.result). Any other value stops the release.
+    required: false
+    default: ""
+  dry-run:
+    description: Whether the run is a dry run (true or false); a dry run always builds.
+    required: false
+    default: "false"
+  repo:
+    description: The repository, as owner/name.
+    required: false
+    default: ${{ github.repository }}
+  head-sha:
+    description: The commit being released (40 hex characters).
+    required: false
+    default: ${{ github.sha }}
+  source-ref:
+    description: The ref the signer workflow runs on, e.g. refs/heads/main.
+    required: false
+    default: ${{ github.ref }}
+  signer-workflow:
+    description: >-
+      The workflow every published artifact must come from: owner/name/.github/workflows/<file>, or a
+      path starting with .github/workflows/, taken relative to repo.
+    required: false
+    default: .github/workflows/release.yaml
+  signer-issuer:
+    description: The OIDC issuer of the signer workflow's keyless cosign signatures.
+    required: false
+    default: https://token.actions.githubusercontent.com
+  out-dir:
+    description: Where the plan and the fetched binaries are written (default $RUNNER_TEMP/release-mode).
+    required: false
+    default: ""
+  install-cosign:
+    description: Whether to install cosign, which verifies published images (false if already installed).
+    required: false
+    default: "true"
+  github-token:
+    description: The token gh uses to read the release and the attestations.
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  mode:
+    description: fresh, publish, reuse or stop.
+    value: ${{ steps.decide.outputs.mode }}
+  reason:
+    description: Why the release stopped, as a short code (empty unless mode is stop).
+    value: ${{ steps.decide.outputs.reason }}
+  build:
+    description: Whether anything must be built (an image, a binary, or a dry run).
+    value: ${{ steps.decide.outputs.build }}
+  tag-exists:
+    description: Whether the tag already exists on this commit.
+    value: ${{ steps.decide.outputs.tag-exists }}
+  release-state:
+    description: absent, draft or published.
+    value: ${{ steps.decide.outputs.release-state }}
+  build-images:
+    description: The images to build, space-separated.
+    value: ${{ steps.decide.outputs.build-images }}
+  reuse-images:
+    description: The published images to reuse, space-separated.
+    value: ${{ steps.decide.outputs.reuse-images }}
+  rebuild:
+    description: The binaries to build, as space-separated binary@os/arch entries.
+    value: ${{ steps.decide.outputs.rebuild }}
+  upload-files:
+    description: >-
+      The fetched binaries to upload as release assets, one path per line; rebuilt binaries are not
+      listed (the plan names their assets).
+    value: ${{ steps.decide.outputs.upload-files }}
+  checksums:
+    description: >-
+      upload (generate and upload it), verify (regenerate it and require it to equal the published
+      one) or none.
+    value: ${{ steps.decide.outputs.checksums }}
+  move-pointers:
+    description: Whether this version is the highest release tag, so the moving pointers follow it.
+    value: ${{ steps.decide.outputs.move-pointers }}
+  plan-file:
+    description: The path of the JSON plan.
+    value: ${{ steps.decide.outputs.plan-file }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Check the install-cosign input
+      shell: bash
+      env:
+        INSTALL_COSIGN: ${{ inputs.install-cosign }}
+      run: |
+        set -euo pipefail
+        case "$INSTALL_COSIGN" in
+        true | false) ;;
+        *)
+          echo "::error::install-cosign must be true or false (got '$INSTALL_COSIGN'). Nothing was looked up."
+          exit 1
+          ;;
+        esac
+
+    # cosign v3, the same one the release workflows sign with, so a signature this check accepts
+    # is one a consumer's cosign verify accepts too.
+    - name: Install cosign
+      if: inputs.install-cosign == 'true'
+      uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+    - name: Decide the release mode
+      id: decide
+      shell: bash
+      env:
+        RM_REPO: ${{ inputs.repo }}
+        RM_TAG: ${{ inputs.tag }}
+        RM_TAG_REGEX: ${{ inputs.tag-regex }}
+        RM_IMAGE_TAG: ${{ inputs.image-tag }}
+        RM_HEAD_SHA: ${{ inputs.head-sha }}
+        RM_SOURCE_REF: ${{ inputs.source-ref }}
+        RM_SIGNER_WORKFLOW: ${{ inputs.signer-workflow }}
+        RM_SIGNER_ISSUER: ${{ inputs.signer-issuer }}
+        RM_IMAGE: ${{ inputs.image }}
+        RM_IMAGES: ${{ inputs.images }}
+        RM_BINARIES: ${{ inputs.binaries }}
+        RM_IMAGE_BINARY_PATHS: ${{ inputs.image-binary-paths }}
+        RM_PLATFORMS: ${{ inputs.platforms }}
+        RM_ASSET_PATTERN: ${{ inputs.asset-pattern }}
+        RM_CHECKSUMS_NAME: ${{ inputs.checksums-name }}
+        RM_EXPECTED_TOOLCHAINS: ${{ inputs.expected-toolchains }}
+        RM_REQUIRED_RESULTS: ${{ inputs.required-results }}
+        RM_DRY_RUN: ${{ inputs.dry-run }}
+        RM_OUT_DIR: ${{ inputs.out-dir }}
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        set -euo pipefail
+        "${GITHUB_ACTION_PATH}/release-mode.sh"
