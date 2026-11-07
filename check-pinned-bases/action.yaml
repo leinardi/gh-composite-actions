@@ -1,0 +1,32 @@
+name: Check pinned bases
+description: >-
+  Fails when a Dockerfile pulls an external image that is not pinned by digest (FROM, COPY --from,
+  RUN --mount from= and the # syntax= frontend), or downloads a file with curl, wget or ADD with no
+  checksum verification in the same instruction. ARG bases are resolved from the global ARG
+  defaults and the given build args; an ARG that cannot be resolved is an error, never a guess.
+
+inputs:
+  dockerfiles:
+    description: >-
+      The Dockerfiles to check, one path or bash glob (** included) per line, relative to the
+      working directory. Every line must match at least one file.
+    required: false
+    default: Dockerfile
+  build-args:
+    description: >-
+      Build args the image is built with, one NAME=VALUE per line, as docker build --build-arg.
+      They override the matching global ARG defaults, as they do in the build.
+    required: false
+    default: ""
+
+runs:
+  using: "composite"
+  steps:
+    - name: Check the Dockerfiles
+      shell: bash
+      env:
+        DOCKERFILES: ${{ inputs.dockerfiles }}
+        BUILD_ARGS: ${{ inputs.build-args }}
+      run: |
+        set -euo pipefail
+        "${GITHUB_ACTION_PATH}/check-pinned-bases.sh"
