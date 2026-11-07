@@ -1,0 +1,55 @@
+name: "Record toolchains"
+description: >-
+  Prints the exact Rust, Go and Node versions a release is about to be built with as the lines a
+  release tag's annotation records ("Rust: 1.98.1", "Go: go1.26.1", "Node: v24.1.0"), so that
+  toolchain-recover can rebuild a failed release later with byte-identical toolchains.
+
+inputs:
+  toolchains:
+    description: >-
+      The toolchains to record: a comma- or space-separated subset of rust, go and node. Each must
+      already be set up and on PATH.
+    required: true
+  annotation-file:
+    description: >-
+      A file to append the lines to, typically the tag message under its first line, before
+      `git tag -a -F <file>`. Empty: the lines are only returned as the `lines` output.
+    required: false
+    default: ""
+  working-directory:
+    description: >-
+      Where the versions are read, so rust-toolchain.toml and go.mod toolchain lines apply as they
+      do in the build.
+    required: false
+    default: "."
+
+outputs:
+  lines:
+    description: "The annotation lines, one per requested toolchain, in the order Rust, Go, Node."
+    value: ${{ steps.record.outputs.lines }}
+  rust-version:
+    description: "The recorded Rust version, e.g. 1.98.1 (empty when rust is not requested)."
+    value: ${{ steps.record.outputs.rust-version }}
+  go-version:
+    description: "The recorded Go version, e.g. go1.26.1 (empty when go is not requested)."
+    value: ${{ steps.record.outputs.go-version }}
+  node-version:
+    description: "The recorded Node version, e.g. v24.1.0 (empty when node is not requested)."
+    value: ${{ steps.record.outputs.node-version }}
+
+runs:
+  using: "composite"
+  steps:
+    # The versions come from the tools themselves (rustc --version, go env GOVERSION,
+    # node --version), not from the setup inputs: a Node major or a `check-latest` Go names a line,
+    # not a release, and only what the build will actually run can be rebuilt later.
+    - name: Record the toolchain versions
+      id: record
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        TOOLCHAINS: ${{ inputs.toolchains }}
+        ANNOTATION_FILE: ${{ inputs.annotation-file }}
+      run: |
+        set -euo pipefail
+        "${GITHUB_ACTION_PATH}/toolchain-record.sh"

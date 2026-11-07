@@ -1,0 +1,89 @@
+name: "Recover toolchains"
+description: >-
+  Switches a release recovery to the exact Rust, Go and Node versions an existing release tag's
+  annotation records (as toolchain-record wrote them), from rustup, go.dev and nodejs.org with
+  their published digests, and fails closed unless rustc, go and node then report exactly those
+  versions. A no-op for a fresh release.
+
+inputs:
+  toolchains:
+    description: >-
+      The toolchains the annotation must record and the job must end up with: a comma- or
+      space-separated subset of rust, go and node.
+    required: true
+  tag:
+    description: >-
+      An existing annotated tag whose annotation is read from the local clone (check out with
+      fetch-tags). Set at most one of tag and annotation; with neither, the run is a fresh release
+      and the action does nothing.
+    required: false
+    default: ""
+  annotation:
+    description: >-
+      The annotation text itself, as `git tag -l --format='%(contents)' <tag>` prints it. Set at
+      most one of tag and annotation.
+    required: false
+    default: ""
+  rust-targets:
+    description: "Comma- or space-separated targets rustup installs with a recorded Rust release."
+    required: false
+    default: ""
+  allow-unrecorded:
+    description: >-
+      true lets an annotation that records none of the requested toolchains (a tag made before they
+      were recorded) pass with a warning and no switch; false fails on it.
+    required: false
+    default: "false"
+  install-dir:
+    description: "Where Go and Node releases are unpacked. Empty: RUNNER_TEMP."
+    required: false
+    default: ""
+  working-directory:
+    description: >-
+      Where the active versions are checked, so rust-toolchain.toml and go.mod toolchain lines
+      apply as they do in the build.
+    required: false
+    default: "."
+
+outputs:
+  mode:
+    description: >-
+      fresh (no annotation), unrecorded (allowed, nothing switched), matched (already the recorded
+      versions) or switched.
+    value: ${{ steps.recover.outputs.mode }}
+  rust-version:
+    description: "The verified active Rust version (empty for fresh, unrecorded, or rust not requested)."
+    value: ${{ steps.recover.outputs.rust-version }}
+  go-version:
+    description: "The verified active Go version (empty for fresh, unrecorded, or go not requested)."
+    value: ${{ steps.recover.outputs.go-version }}
+  node-version:
+    description: "The verified active Node version (empty for fresh, unrecorded, or node not requested)."
+    value: ${{ steps.recover.outputs.node-version }}
+
+runs:
+  using: "composite"
+  steps:
+    # One process selects the recorded versions, checks them and only then persists them through
+    # GITHUB_ENV and GITHUB_PATH. Running actions/setup-go or setup-node a second time behind an
+    # `if:` would switch without anything checking that the switch took, so Go and Node come
+    # straight from their official downloads instead.
+    - name: Switch to the tag's toolchains
+      id: recover
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        TOOLCHAINS: ${{ inputs.toolchains }}
+        TAG: ${{ inputs.tag }}
+        ANNOTATION: ${{ inputs.annotation }}
+        RUST_TARGETS: ${{ inputs.rust-targets }}
+        ALLOW_UNRECORDED: ${{ inputs.allow-unrecorded }}
+        INSTALL_DIR: ${{ inputs.install-dir }}
+      run: |
+        set -euo pipefail
+        if [ -n "${ANNOTATION}" ]; then
+          ANNOTATION_FILE="$(mktemp "${RUNNER_TEMP}/toolchain-annotation.XXXXXX")"
+          printf '%s\n' "${ANNOTATION}" > "${ANNOTATION_FILE}"
+          export ANNOTATION_FILE
+        fi
+        "${GITHUB_ACTION_PATH}/toolchain-recover.sh"
