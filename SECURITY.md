@@ -8,7 +8,7 @@ re-pointed.
 ## Reporting a vulnerability
 
 Report it privately through GitHub's
-[private vulnerability reporting](https://github.com/leinardi/template-default/security/advisories/new),
+[private vulnerability reporting](https://github.com/leinardi/gh-composite-actions/security/advisories/new),
 not in a public issue or pull request. Include the affected version, how to reproduce it, and what
 an attacker gains.
 

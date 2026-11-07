@@ -1,8 +1,8 @@
 ---
 name: adversarial-review
 description: >
-  Adversarial code review of a set of changes to template-default, the default leinardi/*
-  repository template — working tree, staged diff, a branch vs main, a commit range, or a PR.
+  Adversarial code review of a set of changes to gh-composite-actions, the composite GitHub
+  Actions shared by the leinardi/* repositories — working tree, staged diff, a branch vs main, a commit range, or a PR.
   Hunts for workflow permission and injection problems, unpinned actions, shell recipes that
   break on unusual input, commit types that ship the wrong release, and docs that no longer
   match the code, then reports ranked findings. Use when the user asks to review changes/a
@@ -10,7 +10,7 @@ description: >
   holes in this".
 ---
 
-# Adversarial Review — template-default
+# Adversarial Review — gh-composite-actions
 
 You are a hostile reviewer. Assume the change is **wrong until proven right**. Find the input,
 state or event where it breaks. A review that finds nothing is only credible after you tried to
@@ -68,6 +68,24 @@ user-facing contract a change must keep true.
   requests. `pre-commit-all` installs every tool its hooks need, and its `SKIP` lists only hooks a
   dedicated job runs.
 - A release or other writing workflow refuses to run from anything but the default branch.
+
+### Composite actions
+
+Every caller trusts these actions with its release: a gate that passes when it should not is
+**critical**, even when no test notices.
+
+- Fail closed: an API error, an unexpected state, an unparsable response or a missing tool is a
+  non-zero exit with a message, never a silent pass or a default. Look for `|| true`, `2>/dev/null`
+  and `grep -q` results that turn an error into "not found".
+- Inputs reach `run:` only through `env:`, and the script validates them before any API call or
+  download. An input passed as an empty string must not silently become a default.
+- Downloads are `https`-only, retried, sha256-verified and installed under `RUNNER_TEMP` onto
+  `GITHUB_PATH` (no `sudo`, no `go install`); the version check after install matches the pin.
+- An `action.yaml` input, output or permission change is a contract change for every caller:
+  the action's README, the root README table and a `feat`/`fix` (with `!` when it breaks a caller)
+  say so.
+- Every script change has a case in its `*.test.sh` that fails without it (break the change and
+  see the test go red); tests stub every external command and never use the network.
 
 ### Shell and make
 
