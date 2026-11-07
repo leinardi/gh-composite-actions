@@ -1,0 +1,41 @@
+name: Prune caches
+description: >-
+  Deletes the older GitHub Actions cache entries of one ref under one key prefix, keeping the
+  newest ones. Needs `actions: write` on the calling job; without it the prune is skipped with a
+  warning instead of failing, so the job that saved the cache stays green.
+
+inputs:
+  ref:
+    description: "The ref whose cache entries are pruned, such as refs/heads/main"
+    required: false
+    default: ${{ github.ref }}
+  key-prefix:
+    description: >-
+      The cache key prefix, matched as a plain prefix. Include the separator that ends it
+      (`pre-commit|`, `go-build-`), or a shorter prefix also matches other caches' keys.
+    required: true
+  keep:
+    description: "How many of the newest matching entries to keep, a whole number >= 1"
+    required: false
+    default: "1"
+  github-token:
+    description: "The token for the cache API; it needs `actions: write` on this repository"
+    required: false
+    default: ${{ github.token }}
+
+runs:
+  using: "composite"
+  steps:
+    # The logic lives in prune-caches.sh, with tests next to it; the inputs are passed through
+    # env, never interpolated into the shell.
+    - name: Delete the older caches
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        GH_REPO: ${{ github.repository }}
+        CACHE_REF: ${{ inputs.ref }}
+        KEY_PREFIX: ${{ inputs.key-prefix }}
+        KEEP: ${{ inputs.keep }}
+      run: |
+        set -euo pipefail
+        "${GITHUB_ACTION_PATH}/prune-caches.sh"
