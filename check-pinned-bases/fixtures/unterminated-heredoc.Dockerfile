@@ -1,0 +1,3 @@
+FROM alpine@sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+RUN <<EOT
+echo never closed

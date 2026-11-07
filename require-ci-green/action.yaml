@@ -1,0 +1,78 @@
+---
+name: Require CI green
+description: >-
+  Waits until the repository's CI workflow has passed on one exact commit, and fails otherwise.
+  The newest run of the CI workflow file on that SHA, for an accepted event and branch, must
+  have completed successfully in its newest attempt, with exactly one job of the given name
+  concluded success. A check name alone is never trusted. Needs actions: read.
+
+inputs:
+  sha:
+    description: >-
+      The full 40-hex commit SHA CI must have passed on. The run's head_sha must equal it.
+    required: false
+    default: ${{ github.sha }}
+  workflow:
+    description: >-
+      The CI workflow file, matched against the run's path (not the workflow's name).
+    required: false
+    default: .github/workflows/ci.yaml
+  job:
+    description: The job inside that run that must have concluded success.
+    required: false
+    default: ci-result
+  accepted-events:
+    description: >-
+      Space or newline separated entries, each "event" or "event:branch", naming the run
+      triggers that count. A bare "event" means that event on default-branch; branches are
+      compared exactly. Example: "push workflow_dispatch:release/v1.2.3".
+    required: false
+    default: push
+  default-branch:
+    description: The branch a bare accepted-events entry stands for.
+    required: false
+    default: ${{ github.event.repository.default_branch }}
+  interval:
+    description: Seconds between polls while CI is still running or has not started.
+    required: false
+    default: "20"
+  timeout:
+    description: >-
+      Minutes to wait for a finished, matching run before failing. 0 checks once.
+    required: false
+    default: "30"
+  github-token:
+    description: The token used to read workflow runs and jobs. It needs actions read.
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  run-id:
+    description: The id of the workflow run that passed.
+    value: ${{ steps.check.outputs.run-id }}
+  run-url:
+    description: The web URL of the workflow run that passed.
+    value: ${{ steps.check.outputs.run-url }}
+  run-attempt:
+    description: The attempt of that run whose job passed.
+    value: ${{ steps.check.outputs.run-attempt }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Wait for CI to pass on the commit
+      id: check
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        REPOSITORY: ${{ github.repository }}
+        SHA: ${{ inputs.sha }}
+        WORKFLOW: ${{ inputs.workflow }}
+        JOB: ${{ inputs.job }}
+        ACCEPTED_EVENTS: ${{ inputs.accepted-events }}
+        DEFAULT_BRANCH: ${{ inputs.default-branch }}
+        INTERVAL: ${{ inputs.interval }}
+        TIMEOUT: ${{ inputs.timeout }}
+      run: |
+        set -euo pipefail
+        "${GITHUB_ACTION_PATH}/require-ci-green.sh"

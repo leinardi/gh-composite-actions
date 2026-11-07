@@ -1,56 +1,66 @@
-# template-default
+# gh-composite-actions
 
-Default @leinardi repository template: the scaffolding every `leinardi/*` repository shares, before
-any language or stack is added.
+Composite GitHub Actions shared by the `leinardi/*` repositories: tool setup, release versioning,
+the CI-green release gate, image checks, toolchain records and cache pruning. Each action lives in
+its own top-level directory, with its own README, and is tested here before any repository uses it.
 
-## What it contains
+The pre-commit and reviewdog actions are not here: they live in
+[gha-pre-commit-reviewdog-actions](https://github.com/leinardi/gha-pre-commit-reviewdog-actions).
+The reusable workflows that call these actions live in
+[gh-reusable-workflows](https://github.com/leinardi/gh-reusable-workflows).
 
-- **Tooling:** a Makefile on [make-common](https://github.com/leinardi/make-common) (`make check`,
-  `make pre-commit-install`, `make help`), and a pre-commit config with the core hooks, checkmake,
-  actionlint, markdownlint, shellcheck, prettier for YAML, yamllint, and `conventional-pre-commit`
-  on `commit-msg` with `--force-scope`.
-- **CI:** a `pre-commit-all` job that runs every hook on every file, a `conventional-commits` job
-  that checks every commit of a pull request, and a `ci-result` job that aggregates them into the
-  one required check, on pull requests and on pushes to `main`. The reviewdog jobs from
-  [gha-pre-commit-reviewdog-actions](https://github.com/leinardi/gha-pre-commit-reviewdog-actions)
-  comment on pull requests. The pre-commit cache warm-up runs on `main` when the hook config
-  changes and weekly, and prunes the older cache entries.
-- **Release:** a **Release** workflow on
-  [`simple-tag-and-release`](https://github.com/leinardi/gh-reusable-workflows/blob/main/.github/workflows/simple-tag-and-release.md):
-  the version is optional and derived from the commits when empty, with a dry run.
-- **GitHub:** dependabot for the actions and the hooks, CODEOWNERS, a pull request template, and
-  issue templates with blank issues off and a link to the security policy.
-- **Docs:** [AGENTS.md](AGENTS.md), [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md),
-  and an `adversarial-review` skill in `.agents/skills/` (symlinked as `.claude/skills`).
-- **License headers:** `scripts/check-license-headers.sh`, off until the repository has a license
-  (see [AGENTS.md](AGENTS.md#license-headers)).
+## Actions
 
-Every action and reusable workflow is pinned by commit SHA, with the version in a comment;
-dependabot keeps them current.
+| Action | What it does | Permissions |
+| --- | --- | --- |
+| [`setup-svu`](setup-svu/README.md) | Installs svu from its release archive, checked against a pinned SHA-256 (Linux X64 and ARM64) | none |
+| [`release-version`](release-version/README.md) | Resolves and validates the next release version and tag: explicit or derived by svu, strict `<prefix>X.Y.Z`, higher than every release, optional floor | `contents: read` |
+| [`require-ci-green`](require-ci-green/README.md) | Waits until `ci.yaml`'s `ci-result` job passed on one exact commit, for an accepted event and branch, in the newest attempt; fails closed otherwise | `actions: read` |
+| [`release-mode`](release-mode/README.md) | Decides whether a release run is fresh, publishes, reuses or stops, per binary and platform, after verifying everything already published | `contents: read` (+ `packages: read`, `attestations: read` on private repositories) |
+| [`binary-attestation-status`](binary-attestation-status/README.md) | Lists the release files that still need a build-provenance attestation from the signer workflow | `contents: read` |
+| [`trivy-gate`](trivy-gate/README.md) | Scans an image with a pinned Trivy and fails on fixable findings, or only on findings a baseline image does not have | `contents: read` |
+| [`check-pinned-bases`](check-pinned-bases/README.md) | Fails on an external Dockerfile image not pinned by digest, or a download with no checksum verification | `contents: read` |
+| [`toolchain-record`](toolchain-record/README.md) | Prints the Rust, Go and Node versions a release is built with, as tag-annotation lines | none |
+| [`toolchain-recover`](toolchain-recover/README.md) | Switches a release recovery to the toolchains a tag's annotation records, and fails closed unless they are active | `contents: read` |
+| [`setup-shellcheck`](setup-shellcheck/README.md) | Installs a pinned ShellCheck onto PATH, for actionlint and droast | none |
+| [`setup-cargo-deny`](setup-cargo-deny/README.md) | Installs a pinned cargo-deny onto PATH | none |
+| [`setup-zigbuild`](setup-zigbuild/README.md) | Installs pinned zig and cargo-zigbuild onto PATH, for static musl release binaries | none |
+| [`prune-caches`](prune-caches/README.md) | Deletes the older Actions cache entries of one ref under one key prefix, keeping the newest | `actions: write` |
 
-## After creating a repository from this template
+## Usage
 
-1. Replace `template-default` everywhere it names this repository: `git grep -n template-default`
-   lists every place, including the security link in `.github/ISSUE_TEMPLATE/config.yml`.
-2. Rewrite this README and the "What this is" and "Layout" sections of `AGENTS.md` for the project.
-3. Add a `LICENSE`. The template has none on purpose: the repositories do not all use the same one.
-   Then enable the license-header check, as [AGENTS.md](AGENTS.md#license-headers) describes, or
-   delete `scripts/check-license-headers.sh` and its mentions in the docs.
-4. Add the stack, following the repository closest to it (e.g. swarm-scheduler-exporter for Go,
-   adversarial-review-loop for Python):
-    - its pre-commit hooks, the toolchains they need in `pre-commit-all`, and the matching reviewdog
-      and test jobs in `ci.yaml`, each gating job added to `ci-result`'s `needs`;
-    - its dependabot ecosystem, with the `fix(deps)` prefix for dependencies that ship with a
-      release and `chore(deps)` for the rest;
-    - make-common snippets in `MK_COMMON_FILES`, and project targets in a local `.mk/<name>.mk`
-      listed in `MK_LOCAL_FILES`, never as recipes in the Makefile;
-    - its sections in `.editorconfig` and `.prettierignore`.
-5. Keep, extend or delete `release.yaml`: pass `artifact_name` to attach built files, replace it
-   with a stack-specific release (e.g. swarm-scheduler-exporter's for images and binaries), or
-   delete it, and the release sections of the docs, if the project never releases. The first release
-   needs an explicit version, since there is no tag to derive it from.
-6. Tailor `.agents/skills/adversarial-review/SKILL.md`: replace "template-default" with the
-   project's name in its description and title, then adapt its invariants and verification gates.
-7. Run `make pre-commit-install`, then `make check`.
-8. Add the repository to gh-leinardi-iac, with `ci-result` as its required check, and enable
-   private vulnerability reporting, which `SECURITY.md` points to.
+Pin every action by full commit SHA, with the release in a trailing comment:
+
+```yaml
+- uses: leinardi/gh-composite-actions/require-ci-green@<sha> # v1.0.0
+```
+
+The `v1` tag moves to the highest `v1.x.y` release, for reading; callers still pin the SHA, and
+Dependabot's `github-actions` ecosystem keeps it current.
+
+## Conventions
+
+- Every action fails closed: an API error, an unexpected state or an unparsable response is a
+  failed step with a message, never a silent pass.
+- Inputs reach scripts only through `env:`, and are validated before any API call or download.
+- Downloads are `https`-only, retried, verified against a pinned SHA-256 (toolchain-recover: the
+  digests go.dev and nodejs.org publish for the recorded release) and installed under
+  `RUNNER_TEMP` onto `PATH`: no `sudo`, no `go install`.
+- The logic lives in a script next to `action.yaml`, with a plain-bash table test that stubs every
+  external command (`make test`). CI also runs each action the way a caller does
+  (`uses: ./<action>`) on a real runner.
+
+## Development
+
+```bash
+make check               # every pre-commit hook on every file
+make test                # every action's script tests
+make pre-commit-install  # installs the pre-commit and commit-msg hooks
+```
+
+See [AGENTS.md](AGENTS.md) for the layout and the rules a change follows, and
+[CONTRIBUTING.md](CONTRIBUTING.md) for commits and releases.
+
+## License
+
+[MIT](LICENSE)

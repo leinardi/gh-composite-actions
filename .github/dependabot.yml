@@ -1,8 +1,11 @@
 version: 2
 
 updates:
+  # The workflows and every action's action.yaml (each action sits in its own top-level directory).
   - package-ecosystem: "github-actions"
-    directory: "/"
+    directories:
+      - "/"
+      - "/*"
     schedule:
       interval: "monthly"
     # Wait a week after a release before proposing it (GitHub's default is

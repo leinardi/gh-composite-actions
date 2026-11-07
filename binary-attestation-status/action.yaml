@@ -1,0 +1,104 @@
+name: Binary attestation status
+description: >-
+  Lists which of the given release files still need a build-provenance attestation. A file with no
+  attestation is listed; a file attested by the signer workflow for the given source ref and commit
+  is not; a file attested by anything else, or whose status cannot be read, fails the step.
+
+inputs:
+  files:
+    description: >-
+      The files to check, separated by whitespace or newlines (paths must not contain whitespace).
+    required: true
+  repo:
+    description: The repository the attestations belong to, as owner/name.
+    required: false
+    default: ${{ github.repository }}
+  signer-workflow:
+    description: >-
+      The workflow that must have produced an existing attestation: owner/name/.github/workflows/<file>,
+      or a path starting with .github/workflows/, which is taken relative to repo.
+    required: false
+    default: .github/workflows/release.yaml
+  source-ref:
+    description: The ref the signer workflow ran on, e.g. refs/heads/main.
+    required: false
+    default: ${{ github.ref }}
+  source-digest:
+    description: The commit the attested files were built from (40 hex characters).
+    required: false
+    default: ${{ github.sha }}
+  github-token:
+    description: The token gh uses to read the attestations.
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  missing:
+    description: The files that still need an attestation, one per line (empty when none).
+    value: ${{ steps.status.outputs.missing }}
+  missing-count:
+    description: How many files still need an attestation.
+    value: ${{ steps.status.outputs.missing-count }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Check which files need an attestation
+      id: status
+      shell: bash
+      env:
+        FILES: ${{ inputs.files }}
+        REPO: ${{ inputs.repo }}
+        SIGNER_WORKFLOW: ${{ inputs.signer-workflow }}
+        SOURCE_REF: ${{ inputs.source-ref }}
+        SOURCE_DIGEST: ${{ inputs.source-digest }}
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        set -euo pipefail
+
+        # The inputs are checked here so a typo fails with a message naming the input, instead of
+        # surfacing as a gh error the script would report as an unclassifiable lookup.
+        if ! [[ "$REPO" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]; then
+          echo "::error::repo must be owner/name (got '$REPO'). Nothing was checked."
+          exit 1
+        fi
+        if [[ "$SIGNER_WORKFLOW" == .github/workflows/* ]]; then
+          SIGNER_WORKFLOW="$REPO/$SIGNER_WORKFLOW"
+        fi
+        if ! [[ "$SIGNER_WORKFLOW" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+/\.github/workflows/[A-Za-z0-9._-]+\.ya?ml$ ]]; then
+          echo "::error::signer-workflow must be owner/name/.github/workflows/<file>.y(a)ml or .github/workflows/<file>.y(a)ml (got '$SIGNER_WORKFLOW'). Nothing was checked."
+          exit 1
+        fi
+        if ! [[ "$SOURCE_REF" =~ ^refs/(heads|tags)/[^[:space:]]+$ ]]; then
+          echo "::error::source-ref must be a full ref such as refs/heads/main (got '$SOURCE_REF'). Nothing was checked."
+          exit 1
+        fi
+        if ! [[ "$SOURCE_DIGEST" =~ ^[0-9a-f]{40}$ ]]; then
+          echo "::error::source-digest must be a 40-character commit SHA (got '$SOURCE_DIGEST'). Nothing was checked."
+          exit 1
+        fi
+        read -r -d '' -a LIST <<<"$FILES" || true
+        if [ "${#LIST[@]}" -eq 0 ]; then
+          echo "::error::files is empty: name at least one file. Nothing was checked."
+          exit 1
+        fi
+
+        # Its own assignment, so a failure of the script fails the step under set -e.
+        MISSING=$("${GITHUB_ACTION_PATH}/binary-attestation-status.sh" \
+          "$REPO" "$SIGNER_WORKFLOW" "$SOURCE_REF" "$SOURCE_DIGEST" "${LIST[@]}")
+        COUNT=0
+        if [ -n "$MISSING" ]; then
+          COUNT=$(wc -l <<<"$MISSING")
+        fi
+        echo "Files without an attestation: ${MISSING:-none}"
+
+        # A random delimiter, so no file name can end the multi-line value early.
+        DELIMITER="EOF_$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+        {
+          echo "missing<<$DELIMITER"
+          if [ -n "$MISSING" ]; then
+            echo "$MISSING"
+          fi
+          echo "$DELIMITER"
+          echo "missing-count=$COUNT"
+        } >>"$GITHUB_OUTPUT"

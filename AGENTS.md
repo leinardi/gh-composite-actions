@@ -2,38 +2,52 @@
 
 ## What this is
 
-The default template for `leinardi/*` repositories: the shared scaffolding (Makefile, pre-commit
-hooks, CI, release, GitHub settings files, docs, skills) with no language or stack yet. Repositories
-created from it copy these files once; a change here reaches only the repositories created
-afterwards, so a fix that existing repositories need is ported to them separately.
+Composite GitHub Actions shared by the `leinardi/*` repositories (`leinardi/gh-composite-actions/<action>@<sha>`):
+tool setup (`setup-svu`, `setup-shellcheck`, `setup-cargo-deny`, `setup-zigbuild`), release
+versioning (`release-version`), the CI-green release gate (`require-ci-green`), release recovery
+(`release-mode`, `binary-attestation-status`, `toolchain-record`, `toolchain-recover`), image
+checks (`trivy-gate`, `check-pinned-bases`) and cache pruning (`prune-caches`). Callers trust
+these with their releases: a gate that passes when it should not is the worst bug this repository
+can have.
+
+**Not here:** the pre-commit and reviewdog actions belong in
+[gha-pre-commit-reviewdog-actions](https://github.com/leinardi/gha-pre-commit-reviewdog-actions),
+and reusable workflows in [gh-reusable-workflows](https://github.com/leinardi/gh-reusable-workflows).
+A new action that runs a pre-commit hook or posts reviewdog comments goes there, not here.
 
 ## Common commands
 
 ```bash
 make check               # pre-commit on all files: the local gate, as CI's pre-commit-all
+make test                # every action's script tests (*/*.test.sh), as CI's script-tests
 make check-stage         # pre-commit on the staged files only
 make pre-commit-install  # installs the pre-commit and commit-msg hooks
 make mk-common-update    # refresh the shared .mk snippets from leinardi/make-common@v1
 make help                # lists every target
 ```
 
-Before calling a change done, run `make check`: checkmake, actionlint, markdownlint, shellcheck,
-prettier and yamllint. In CI, `ci-result` is the one required check: it needs `pre-commit-all` and
-`conventional-commits` (`ci.yaml`); the reviewdog jobs only annotate pull requests.
+Before calling a change done, run `make check` and `make test`. In CI, `ci-result` is the one
+required check: it needs `pre-commit-all`, `conventional-commits`, `script-tests` and every
+`self-test-*` job (`ci.yaml`); the reviewdog jobs only annotate pull requests.
 
 The Makefile pulls shared snippets from `leinardi/make-common@v1` into `.mk/` on first run. Project
-targets live in the local `.mk/*.mk` files listed in `MK_LOCAL_FILES`, never as recipes in the
-Makefile.
+targets live in the local `.mk/*.mk` files listed in `MK_LOCAL_FILES` (`test.mk`), never as recipes
+in the Makefile.
 
 ## Layout
 
 | Path | What lives there |
 | --- | --- |
-| `Makefile`, `.mk/`, `scripts/bootstrap-mk-common.sh` | make-common: shared snippets in `MK_COMMON_FILES`, local ones in `MK_LOCAL_FILES` |
-| `.github/workflows/ci.yaml` | `pre-commit-all`, `conventional-commits` and the `ci-result` aggregator; the reviewdog jobs on pull requests |
-| `.github/workflows/release.yaml` | the **Release** workflow, on gh-reusable-workflows' `simple-tag-and-release` |
-| `.github/workflows/pre-commit-warmup.yaml` | refreshes the pre-commit cache on `main` (hook config change, weekly) and prunes the older entries |
-| `scripts/check-license-headers.sh` | the license-header check, off until the repository has a license ([License headers](#license-headers)) |
+| `<action>/action.yaml` | one composite action per top-level directory; its name is the action's path in `uses:` |
+| `<action>/<name>.sh` (and `.py`) | the action's logic, called as `"${GITHUB_ACTION_PATH}/<name>.sh"`, inputs through `env:` |
+| `<action>/<name>.test.sh` | plain-bash table tests for that script: stubs on a temp `PATH`, no network, no token |
+| `<action>/README.md` | the action's contract: inputs, outputs, permissions, an example |
+| `check-pinned-bases/fixtures/` | Dockerfile fixtures, including copies of the callers' real Dockerfiles |
+| `scripts/run-tests.sh` | `make test`: runs every tracked `*/*.test.sh` |
+| `.github/workflows/ci.yaml` | `pre-commit-all`, `script-tests`, one `self-test-*` job per action (`uses: ./<action>` on a real runner), `ci-result` |
+| `.github/workflows/release.yaml` | the **Release** workflow, on gh-reusable-workflows' `simple-tag-and-release`, which also moves `v1` |
+| `.github/workflows/pre-commit-warmup.yaml` | refreshes the pre-commit cache on `main` and prunes the older entries |
+| `scripts/check-license-headers.sh` | the MIT license-header check |
 | `.agents/skills/` | project skills; `.claude/skills` is a symlink to it |
 
 ### Generated or vendored: never hand-edit
@@ -45,50 +59,32 @@ Makefile.
 ## Conventions
 
 - Pin every action and reusable workflow by full commit SHA, with the version in a trailing comment
-  (`@<sha> # vX.Y.Z`).
+  (`@<sha> # vX.Y.Z`), inside `action.yaml` files too: Dependabot scans `/` and `/*`.
 - Give every workflow a top-level `permissions: contents: read`, and widen it only on the job that
-  needs more.
+  needs more. `persist-credentials: false` on every checkout.
 - Pass `${{ }}` expressions into `run:` scripts through `env:`, never inline them in the script.
-- Name workflow files `.yaml`, except a file whose name a trusted publisher (PyPI, npm) is bound to.
-- A new gating CI job is added to `ci-result`'s `needs`. A hook that needs a system tool gets that
-  tool installed in `pre-commit-all`; a hook that a dedicated job runs instead is listed in
-  `pre-commit-all`'s `SKIP`, with the job named in a comment.
+- Name workflow and action files `.yaml`. Name action inputs and outputs in kebab-case; the token
+  input is `github-token`.
+- Fail closed: every API error, unexpected state, unparsable response or missing tool is a non-zero
+  exit with an `::error::` message that says what was found and that nothing was changed.
+- Validate inputs before any API call or download; an input passed as an empty string does not
+  silently become a default.
+- Downloads: `curl -fsSL --proto '=https' --retry 3`, `sha256sum --check --strict`, installed under
+  `RUNNER_TEMP` onto `GITHUB_PATH`, then a version check that must match the pin. No `sudo`, no
+  `go install`.
+- An input, output or permission change is a contract change for every caller: update the
+  action's README and the root README table, and use `feat`/`fix` (`!` when a caller breaks).
+- Every script change gets a test case that fails without it, and a `self-test-*` step when it
+  changes what a real runner does.
 - `README.md` is the user-facing contract: keep it in step with what the repository does.
 
 ## License headers
 
-The template has no `LICENSE`, so nothing checks headers here. `scripts/check-license-headers.sh`
-is ready for the repository that picks one; until it is configured it refuses to run. To enable it:
-
-1. Add the `LICENSE`, and fill in the configuration block at the top of the script:
-   `PROJECT_NAME`, `COPYRIGHT_HOLDER`, `LICENSE_NAME` and `REQUIRED_LINES` (presets for MIT,
-   Apache-2.0 and GPL-3.0-or-later are in its comments). Trim `GOVERNED_EXTENSIONS` and
-   `GOVERNED_NAMES` to the stack if needed, and exempt generated and vendored files in
-   `EXEMPT_PREFIXES` or `EXEMPT_PATHS`, each for a reason.
-2. Add the header to every file the script lists, the script itself included (after the shebang),
-   with the year the file was first committed:
-   `git log --diff-filter=A --follow --format=%ad --date=format:%Y -- <file> | tail -1`. An
-   IntelliJ copyright profile in `.idea/copyright/` (which `.gitignore` tracks) keeps new files
-   right.
-3. Wire the hook into the `local` repo of `.pre-commit-config.yaml`. It reads the whole tree, so it
-   always runs; `stages` pins it to one stage, because `always_run` makes a hook eligible at every
-   installed stage, and `commit-msg` is one of them:
-
-   ```yaml
-   - id: check-license-headers
-     name: license headers
-     entry: scripts/check-license-headers.sh
-     language: system
-     pass_filenames: false
-     always_run: true
-     stages: [pre-commit]
-   ```
-
-4. Rewrite this section to say what the check enforces, and its validation matrix row to run it.
-
-Governed by default: code (shell, Python, Go, TypeScript, JavaScript, Vue, Rust, Ruby, Terraform,
-Lua, Dockerfiles, the Makefile and the repo-local `.mk` fragments). Never YAML, JSON or Markdown.
-The make-common files are exempt: they carry make-common's own header.
+The repository is MIT-licensed (`LICENSE`). `scripts/check-license-headers.sh`, run by the
+`check-license-headers` pre-commit hook, fails on any tracked shell or Python script, the Makefile
+or a repo-local `.mk` fragment whose first lines lack the MIT notice with Roberto Leinardi's
+copyright. Never YAML, JSON or Markdown. The make-common files are exempt: they carry make-common's
+own header. A new file takes the year it was first committed.
 
 ## Markdown
 
@@ -134,11 +130,13 @@ Run before considering an edit done. `make check` applies to every row.
 
 | You edited | Run |
 | --- | --- |
+| `<action>/*.sh`, `<action>/*.py` | `make test`; break the change on purpose and see a case fail |
+| `<action>/action.yaml` | `make test`; the action's `self-test-*` job in `ci.yaml` covers the change; its README and the root README table match |
 | `.github/workflows/**`, `.github/dependabot.yml` | `pre-commit run actionlint --all-files`; reason through each trigger the workflow has (pull request, push, dispatch, schedule) |
 | `.pre-commit-config.yaml` | `make check`; a hook that needs a system tool also gets it in `ci.yaml`'s `pre-commit-all` |
 | `Makefile`, the `.mk/*.mk` files in `MK_LOCAL_FILES` | `make check` (checkmake), `make help` |
 | `scripts/bootstrap-mk-common.sh`, the make-common `.mk` files | never by hand: port the change to make-common, then `make mk-common-update` and `make help` |
-| `scripts/check-license-headers.sh` | `make check` (shellcheck); once configured, run it, and see a file without the header fail it |
+| `scripts/check-license-headers.sh` | `make check`; see a file without the header fail it |
 | `**/*.md`, `.agents/skills/**` | `make check` (markdownlint); prose wrapped at 100 columns |
 
 ## Project skills

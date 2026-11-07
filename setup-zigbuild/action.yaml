@@ -1,0 +1,122 @@
+name: "Set up cargo-zigbuild"
+description: >-
+  Installs zig and cargo-zigbuild onto PATH, the cross-compiler and linker behind static musl
+  release binaries, each verified against its published digest. The versions should be the ones
+  the caller's image build stage pins, so release binaries and image binaries are built alike.
+
+inputs:
+  zig-version:
+    description: >-
+      The zig release, e.g. 0.17.0. Override it together with zig-sha256: a version without its
+      own digest fails the digest check.
+    required: false
+    default: "0.17.0"
+  zig-sha256:
+    description: >-
+      The sha256 of zig-x86_64-linux-<version>.tar.xz, from https://ziglang.org/download/index.json.
+    required: false
+    default: "1cbe9df9f27e6b78d14ccbca43b6703a404ef79ef1c463de901d7f088d4e2026"
+  cargo-zigbuild-version:
+    description: >-
+      The cargo-zigbuild release, e.g. 0.24.0. Override it together with cargo-zigbuild-sha256.
+    required: false
+    default: "0.24.0"
+  cargo-zigbuild-sha256:
+    description: >-
+      The sha256 of cargo-zigbuild-x86_64-unknown-linux-musl.tar.xz, from the release asset's
+      .sha256 at https://github.com/rust-cross/cargo-zigbuild/releases/download/v<version>/.
+    required: false
+    default: "52be2cb85ad3875682564a29bac1832b2ab3db68b1c504765c92d5249cc9b96f"
+
+outputs:
+  zig-path:
+    description: "The directory holding the installed zig, already on PATH for later steps."
+    value: ${{ steps.install.outputs.zig-path }}
+  cargo-zigbuild-path:
+    description: "The directory holding the installed cargo-zigbuild, already on PATH for later steps."
+    value: ${{ steps.install.outputs.cargo-zigbuild-path }}
+
+runs:
+  using: "composite"
+  steps:
+    # Both are unpacked under RUNNER_TEMP and put on GITHUB_PATH rather than installed with sudo
+    # into /usr/local/bin; cargo-zigbuild runs the zig it finds on PATH.
+    - name: Install zig and cargo-zigbuild
+      id: install
+      shell: bash
+      env:
+        ZIG_VERSION: ${{ inputs.zig-version }}
+        ZIG_SHA256: ${{ inputs.zig-sha256 }}
+        CARGO_ZIGBUILD_VERSION: ${{ inputs.cargo-zigbuild-version }}
+        CARGO_ZIGBUILD_SHA256: ${{ inputs.cargo-zigbuild-sha256 }}
+      run: |
+        set -euo pipefail
+        for pair in "zig-version:${ZIG_VERSION}" "cargo-zigbuild-version:${CARGO_ZIGBUILD_VERSION}"; do
+          if ! [[ "${pair#*:}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::setup-zigbuild: ${pair%%:*} '${pair#*:}' is not a release X.Y.Z. Nothing was installed."
+            exit 1
+          fi
+        done
+        for pair in "zig-sha256:${ZIG_SHA256}" "cargo-zigbuild-sha256:${CARGO_ZIGBUILD_SHA256}"; do
+          if ! [[ "${pair#*:}" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error::setup-zigbuild: ${pair%%:*} '${pair#*:}' is not a lowercase hex sha256. Nothing was installed."
+            exit 1
+          fi
+        done
+        if [ "$(uname -m)" != "x86_64" ]; then
+          echo "::error::setup-zigbuild installs the x86_64 assets only (got $(uname -m)). Nothing was installed."
+          exit 1
+        fi
+
+        work="$(mktemp -d "${RUNNER_TEMP}/setup-zigbuild.XXXXXX")"
+
+        zig_archive="${work}/zig.tar.xz"
+        curl -fsSL --proto '=https' --retry 3 -o "${zig_archive}" \
+          "https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz"
+        echo "${ZIG_SHA256}  ${zig_archive}" | sha256sum --check --strict -
+        zig_dir="${work}/zig"
+        mkdir -p "${zig_dir}"
+        tar -xJf "${zig_archive}" -C "${zig_dir}" --strip-components=1
+
+        zigbuild_archive="${work}/cargo-zigbuild.tar.xz"
+        curl -fsSL --proto '=https' --retry 3 -o "${zigbuild_archive}" \
+          "https://github.com/rust-cross/cargo-zigbuild/releases/download/v${CARGO_ZIGBUILD_VERSION}/cargo-zigbuild-x86_64-unknown-linux-musl.tar.xz"
+        echo "${CARGO_ZIGBUILD_SHA256}  ${zigbuild_archive}" | sha256sum --check --strict -
+        zigbuild_dir="${work}/cargo-zigbuild"
+        mkdir -p "${zigbuild_dir}"
+        tar -xJf "${zigbuild_archive}" -C "${zigbuild_dir}" --strip-components=1
+        chmod 0755 "${zigbuild_dir}/cargo-zigbuild"
+
+        if [ "$("${zig_dir}/zig" version)" != "${ZIG_VERSION}" ]; then
+          echo "::error::setup-zigbuild: the unpacked zig does not report version ${ZIG_VERSION}. Nothing was put on PATH."
+          exit 1
+        fi
+        if [ "$("${zigbuild_dir}/cargo-zigbuild" --version)" != "cargo-zigbuild ${CARGO_ZIGBUILD_VERSION}" ]; then
+          echo "::error::setup-zigbuild: the unpacked cargo-zigbuild does not report version ${CARGO_ZIGBUILD_VERSION}. Nothing was put on PATH."
+          exit 1
+        fi
+        {
+          echo "${zig_dir}"
+          echo "${zigbuild_dir}"
+        } >> "${GITHUB_PATH}"
+        {
+          echo "zig-path=${zig_dir}"
+          echo "cargo-zigbuild-path=${zigbuild_dir}"
+        } >> "${GITHUB_OUTPUT}"
+
+    - name: Check zig and cargo-zigbuild are on PATH
+      shell: bash
+      env:
+        WANT_ZIG: ${{ steps.install.outputs.zig-path }}/zig
+        WANT_ZIGBUILD: ${{ steps.install.outputs.cargo-zigbuild-path }}/cargo-zigbuild
+      run: |
+        set -euo pipefail
+        for pair in "zig:${WANT_ZIG}" "cargo-zigbuild:${WANT_ZIGBUILD}"; do
+          got="$(command -v "${pair%%:*}" || true)"
+          if [ "${got}" != "${pair#*:}" ]; then
+            echo "::error::setup-zigbuild: ${pair%%:*} resolves to ${got}, not ${pair#*:}."
+            exit 1
+          fi
+        done
+        zig version
+        cargo-zigbuild --version

@@ -29,6 +29,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
@@ -62,6 +64,7 @@ jobs:
   actionlint:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     # reviewdog posts its findings as a pull request review, which needs pull-requests: write.
     permissions:
       contents: read
@@ -72,6 +75,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Run actionlint via pre-commit + reviewdog
         uses: leinardi/gha-pre-commit-reviewdog-actions/actionlint@007919a45a04b0c52dfbb46732019dc4831fc03c # v1.0.3
@@ -83,6 +87,7 @@ jobs:
   pre-commit-hooks:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     # reviewdog posts its findings as a pull request review, which needs pull-requests: write.
     permissions:
       contents: read
@@ -93,6 +98,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Run pre-commit hooks + reviewdog diff
         uses: leinardi/gha-pre-commit-reviewdog-actions/pre-commit-hooks@007919a45a04b0c52dfbb46732019dc4831fc03c # v1.0.3
@@ -104,6 +110,7 @@ jobs:
   markdownlint:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     # reviewdog posts its findings as a pull request review, which needs pull-requests: write.
     permissions:
       contents: read
@@ -114,6 +121,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Run markdownlint-cli2 via pre-commit + reviewdog
         uses: leinardi/gha-pre-commit-reviewdog-actions/markdownlint-cli2@007919a45a04b0c52dfbb46732019dc4831fc03c # v1.0.3
@@ -125,6 +133,7 @@ jobs:
   shellcheck:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     # reviewdog posts its findings as a pull request review, which needs pull-requests: write.
     permissions:
       contents: read
@@ -135,6 +144,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Run shellcheck via pre-commit + reviewdog
         uses: leinardi/gha-pre-commit-reviewdog-actions/shellcheck@007919a45a04b0c52dfbb46732019dc4831fc03c # v1.0.3
@@ -146,6 +156,7 @@ jobs:
   yamllint:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     # reviewdog posts its findings as a pull request review, which needs pull-requests: write.
     permissions:
       contents: read
@@ -156,6 +167,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Run yamllint via pre-commit + reviewdog
         uses: leinardi/gha-pre-commit-reviewdog-actions/yamllint@007919a45a04b0c52dfbb46732019dc4831fc03c # v1.0.3
@@ -173,12 +185,14 @@ jobs:
     # commits. No pull-request title check: squash merging is disabled.
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Validate the commit messages
         uses: leinardi/gha-pre-commit-reviewdog-actions/conventional-commits@007919a45a04b0c52dfbb46732019dc4831fc03c # v1.0.3
@@ -186,14 +200,470 @@ jobs:
           from-ref: ${{ github.event.pull_request.base.sha }}
           to-ref: ${{ github.event.pull_request.head.sha }}
 
+  # Every action's script tests: the table tests behind each gate (stubbed gh, git, registries; no
+  # network, no token).
+  script-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run every action's script tests
+        run: make test
+
+  # The self-test jobs run each action from this checkout (uses: ./<action>) the way a caller does,
+  # on the real runner: the downloads, the digests and the version checks the script tests stub.
+  self-test-setup-svu:
+    strategy:
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned svu
+        id: svu
+        uses: ./setup-svu
+
+      - name: Check svu is on PATH at the reported path, at the pinned version
+        env:
+          SVU_PATH: ${{ steps.svu.outputs.path }}
+        run: |
+          set -euo pipefail
+          test "$(command -v svu)" = "${SVU_PATH}/svu"
+          svu --version | grep -qE '^GitVersion:[[:space:]]+3\.4\.1$'
+
+      - name: A version override without its sha256
+        id: override
+        continue-on-error: true
+        uses: ./setup-svu
+        with:
+          version: 3.4.0
+
+      - name: Check the override failed
+        env:
+          OUTCOME: ${{ steps.override.outcome }}
+        run: |
+          set -euo pipefail
+          test "${OUTCOME}" = failure
+
+  self-test-release-version:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+
+      - name: Install svu
+        uses: ./setup-svu
+
+      - name: Run the script tests against the real svu
+        run: |
+          set -euo pipefail
+          RELEASE_VERSION_TEST_SVU="$(command -v svu)" bash release-version/release-version.test.sh
+
+      # 999.0.0 is above any version this repository will tag.
+      - name: Resolve an explicit version on this repository
+        id: explicit
+        uses: ./release-version
+        with:
+          version: 999.0.0
+
+      - name: Resolve an explicit version with another prefix and a floor
+        id: prefixed
+        uses: ./release-version
+        with:
+          version: selftest--v1.2.3
+          tag-prefix: selftest--v
+          floor-version: 1.2.3
+
+      - name: A version below the floor
+        id: below
+        continue-on-error: true
+        uses: ./release-version
+        with:
+          version: 1.2.2
+          tag-prefix: selftest--v
+          floor-version: 1.2.3
+
+      - name: Check the outputs
+        env:
+          E_VERSION: ${{ steps.explicit.outputs.version }}
+          E_TAG: ${{ steps.explicit.outputs.tag }}
+          E_EXPLICIT: ${{ steps.explicit.outputs.explicit }}
+          E_RECOVERY: ${{ steps.explicit.outputs.recovery }}
+          E_MAJOR: ${{ steps.explicit.outputs.major }}
+          P_TAG: ${{ steps.prefixed.outputs.tag }}
+          P_PREVIOUS: ${{ steps.prefixed.outputs.previous }}
+          P_MAJOR: ${{ steps.prefixed.outputs.major }}
+          BELOW: ${{ steps.below.outcome }}
+        run: |
+          set -euo pipefail
+          test "${E_VERSION} ${E_TAG} ${E_EXPLICIT} ${E_RECOVERY} ${E_MAJOR}" = "999.0.0 v999.0.0 true false v999"
+          test "${P_TAG} ${P_MAJOR}" = "selftest--v1.2.3 selftest--v1"
+          test -z "${P_PREVIOUS}"
+          test "${BELOW}" = failure
+
+  self-test-prune-caches:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # actions: read lists the caches; a delete would need actions: write and is not exercised here.
+    permissions:
+      contents: read
+      actions: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Prune a key prefix no cache uses
+        uses: ./prune-caches
+        with:
+          key-prefix: "selftest-prune-${{ github.run_id }}|"
+          keep: 1
+
+      - name: A bad keep
+        id: bad
+        continue-on-error: true
+        uses: ./prune-caches
+        with:
+          key-prefix: "selftest-prune-${{ github.run_id }}|"
+          keep: 0
+
+      - name: Check the bad keep failed
+        env:
+          OUTCOME: ${{ steps.bad.outcome }}
+        run: |
+          set -euo pipefail
+          test "${OUTCOME}" = failure
+
+  self-test-require-ci-green:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # actions: read lists the workflow runs and their jobs.
+    permissions:
+      contents: read
+      actions: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: A commit with no CI run fails closed
+        id: none
+        continue-on-error: true
+        uses: ./require-ci-green
+        with:
+          sha: "0000000000000000000000000000000000000000"
+          timeout: "0"
+
+      - name: A bad SHA is refused
+        id: bad
+        continue-on-error: true
+        uses: ./require-ci-green
+        with:
+          sha: not-a-sha
+          timeout: "0"
+
+      - name: Check both failed
+        env:
+          NONE: ${{ steps.none.outcome }}
+          BAD: ${{ steps.bad.outcome }}
+        run: |
+          set -euo pipefail
+          test "${NONE} ${BAD}" = "failure failure"
+
+  self-test-binary-attestation-status:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Make a file nothing has attested
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/selftest"
+          head -c 64 /dev/urandom >"${RUNNER_TEMP}/selftest/unattested.bin"
+
+      - name: Ask for its attestation status
+        id: status
+        uses: ./binary-attestation-status
+        with:
+          files: ${{ runner.temp }}/selftest/unattested.bin
+          # A pull request's own ref (refs/pull/N/merge) is not a release ref.
+          source-ref: refs/heads/main
+
+      - name: Check the unattested file is listed
+        env:
+          MISSING: ${{ steps.status.outputs.missing }}
+          COUNT: ${{ steps.status.outputs.missing-count }}
+          WANT: ${{ runner.temp }}/selftest/unattested.bin
+        run: |
+          set -euo pipefail
+          test "${COUNT}" = 1
+          test "${MISSING}" = "${WANT}"
+
+  # Binary-only, with a tag that never exists, so nothing is looked up in a registry; the table
+  # tests cover the image paths.
+  self-test-release-mode:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+
+      - name: Decide the mode of an unreleased version
+        id: mode
+        uses: ./release-mode
+        with:
+          tag: v0.0.0
+          binaries: selftest
+          platforms: linux/amd64,linux/arm64
+          install-cosign: "false"
+          # A pull request's own ref (refs/pull/N/merge) is not a release ref.
+          source-ref: refs/heads/main
+
+      - name: Check a version with nothing published is fresh
+        env:
+          MODE: ${{ steps.mode.outputs.mode }}
+          BUILD: ${{ steps.mode.outputs.build }}
+          REBUILD: ${{ steps.mode.outputs.rebuild }}
+          PLAN: ${{ steps.mode.outputs.plan-file }}
+        run: |
+          set -euo pipefail
+          test "${MODE}" = fresh
+          test "${BUILD}" = true
+          test "${REBUILD}" = "selftest@linux/amd64 selftest@linux/arm64"
+          jq -e '.checksums.action == "upload" and (.binaries | length) == 2' "${PLAN}"
+
+  self-test-check-pinned-bases:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Pinned Dockerfiles pass
+        uses: ./check-pinned-bases
+        with:
+          dockerfiles: |
+            check-pinned-bases/fixtures/awtrix-controller.pinned.Dockerfile
+            check-pinned-bases/fixtures/swarm-rootless-docker.pinned.Dockerfile
+            check-pinned-bases/fixtures/bitgauge.pinned.Dockerfile
+            check-pinned-bases/fixtures/bitgauge-tools.Dockerfile
+            check-pinned-bases/fixtures/herdquay.pinned-verified.Dockerfile
+            check-pinned-bases/fixtures/multi-stage.Dockerfile
+
+      - name: A build arg pins an ARG base
+        uses: ./check-pinned-bases
+        with:
+          dockerfiles: check-pinned-bases/fixtures/args.Dockerfile
+          build-args: |
+            BASE=docker.io/library/alpine:3.23@sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+
+      - name: An unpinned base fails
+        id: unpinned
+        continue-on-error: true
+        uses: ./check-pinned-bases
+        with:
+          dockerfiles: check-pinned-bases/fixtures/unpinned.Dockerfile
+
+      - name: Check the unpinned base failed
+        env:
+          OUTCOME: ${{ steps.unpinned.outcome }}
+        run: |
+          set -euo pipefail
+          test "${OUTCOME}" = failure
+
+  # The same image as image and baseline, so the gate cannot turn red on a new CVE.
+  self-test-trivy-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: An image adds nothing to itself
+        id: self
+        uses: ./trivy-gate
+        with:
+          image: docker.io/library/alpine:3.23
+          baseline-image: docker.io/library/alpine:3.23
+          platform: linux/amd64
+
+      - name: Check the outputs
+        env:
+          REPORT: ${{ steps.self.outputs.report }}
+          FINDINGS: ${{ steps.self.outputs.findings }}
+        run: |
+          set -euo pipefail
+          test "${FINDINGS}" = 0
+          jq -e '.SchemaVersion == 2' "${REPORT}" >/dev/null
+
+  self-test-setup-tools:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install ShellCheck
+        id: shellcheck
+        uses: ./setup-shellcheck
+
+      - name: Install cargo-deny
+        uses: ./setup-cargo-deny
+
+      - name: Install zig and cargo-zigbuild
+        uses: ./setup-zigbuild
+
+      - name: Check every tool is on PATH at its pinned version
+        env:
+          SC_PATH: ${{ steps.shellcheck.outputs.path }}
+        run: |
+          set -euo pipefail
+          test "$(command -v shellcheck)" = "${SC_PATH}/shellcheck"
+          shellcheck --version | grep -qx 'version: 0.11.0'
+          cargo-deny --version | grep -qx 'cargo-deny 0.20.2'
+          test "$(zig version)" = 0.17.0
+          test "$(cargo-zigbuild --version)" = "cargo-zigbuild 0.24.0"
+
+      - name: A version override with the default digest
+        id: bad
+        continue-on-error: true
+        uses: ./setup-shellcheck
+        with:
+          version: v0.10.0
+
+      - name: Check the override failed
+        env:
+          OUTCOME: ${{ steps.bad.outcome }}
+        run: |
+          set -euo pipefail
+          test "${OUTCOME}" = failure
+
+  self-test-toolchains:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+
+      - name: Record the runner's toolchains
+        id: record
+        uses: ./toolchain-record
+        with:
+          toolchains: rust,go,node
+
+      - name: Recovering the recorded versions matches
+        id: same
+        uses: ./toolchain-recover
+        with:
+          toolchains: rust,go,node
+          annotation: ${{ steps.record.outputs.lines }}
+
+      - name: A fresh release is a no-op
+        id: fresh
+        uses: ./toolchain-recover
+        with:
+          toolchains: go
+
+      - name: Switch to older recorded releases
+        id: old
+        uses: ./toolchain-recover
+        with:
+          toolchains: rust,go,node
+          annotation: |
+            self-test v0.0.0
+
+            Rust: 1.85.0
+            Go: go1.25.0
+            Node: v22.11.0
+
+      - name: A requested toolchain without a line fails closed
+        id: missing
+        continue-on-error: true
+        uses: ./toolchain-recover
+        with:
+          toolchains: go,node
+          annotation: |
+            self-test v0.0.0
+
+            Node: v22.11.0
+
+      - name: Check the modes, and that later steps see the switch
+        env:
+          SAME: ${{ steps.same.outputs.mode }}
+          FRESH: ${{ steps.fresh.outputs.mode }}
+          OLD: ${{ steps.old.outputs.mode }}
+          MISSING: ${{ steps.missing.outcome }}
+        run: |
+          set -euo pipefail
+          test "${SAME} ${FRESH} ${OLD} ${MISSING}" = "matched fresh switched failure"
+          test "$(rustc --version | awk '{print $2}')" = 1.85.0
+          test "$(go env GOVERSION)" = go1.25.0
+          test "$(node --version)" = v22.11.0
+
   # The single required check: green only when every gating job succeeded. conventional-commits
-  # only runs on pull requests, so it may be skipped on a push or a dispatch. A repository that adds
-  # a gating job (tests, build, audit) adds it to needs.
+  # only runs on pull requests, so it may be skipped on a push or a dispatch. Every script-test and
+  # self-test job gates.
   ci-result:
     if: always()
     needs:
       - pre-commit-all
       - conventional-commits
+      - script-tests
+      - self-test-setup-svu
+      - self-test-release-version
+      - self-test-prune-caches
+      - self-test-require-ci-green
+      - self-test-binary-attestation-status
+      - self-test-release-mode
+      - self-test-check-pinned-bases
+      - self-test-trivy-gate
+      - self-test-setup-tools
+      - self-test-toolchains
     runs-on: ubuntu-latest
     timeout-minutes: 5
 

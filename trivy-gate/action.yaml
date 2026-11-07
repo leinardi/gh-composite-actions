@@ -1,0 +1,114 @@
+name: Trivy gate
+description: >-
+  Installs a pinned Trivy and scans an image for vulnerabilities, failing on any finding at the
+  given severities after the unfixed ones and the committed exceptions are left out. Given a
+  baseline image (the base it was built on), it fails only on the findings the image adds to that
+  baseline, and reports the inherited ones as a warning.
+
+inputs:
+  image:
+    description: >-
+      The image to scan: a reference Trivy can pull or find locally, best by digest
+      (registry/name@sha256:...).
+    required: true
+  platform:
+    description: >-
+      The one platform to scan (os/arch[/variant], e.g. linux/arm64) of a multi-platform image.
+      Required with baseline-image. Empty: Trivy picks the runner's platform.
+    required: false
+    default: ""
+  baseline-image:
+    description: >-
+      The image the scanned image was built on, best by digest. When set, only the findings the
+      image adds to it fail the gate; the ones both carry are reported as a warning and in the
+      step summary. Empty: every finding fails.
+    required: false
+    default: ""
+  severity:
+    description: >-
+      The severities that fail the gate, comma-separated (UNKNOWN, LOW, MEDIUM, HIGH, CRITICAL).
+      An empty value is refused, not defaulted.
+    required: false
+    default: HIGH,CRITICAL
+  ignore-unfixed:
+    description: >-
+      Leave out the vulnerabilities that have no fix upstream (true or false; an empty value is
+      refused, not defaulted).
+    required: false
+    default: "true"
+  ignorefile:
+    description: >-
+      Trivy's exceptions file, relative to the working directory. Used only when it exists; empty
+      means none. Either way Trivy's own defaults (./.trivyignore, ./trivy.yaml, TRIVY_*
+      variables other than the registry credentials) are never applied.
+    required: false
+    default: .trivyignore.yaml
+  format:
+    description: >-
+      The format of the report file: json, table, sarif, cyclonedx, spdx-json or github. The gate
+      itself always reads Trivy's JSON.
+    required: false
+    default: json
+  report:
+    description: >-
+      Where to write the scanned image's full report. Empty: trivy-report.<json|sarif|txt> in
+      RUNNER_TEMP.
+    required: false
+    default: ""
+
+outputs:
+  report:
+    description: The path of the scanned image's report.
+    value: ${{ steps.scan.outputs.report }}
+  findings:
+    description: >-
+      How many findings failed the gate: every finding, or with baseline-image the ones the
+      baseline does not carry.
+    value: ${{ steps.scan.outputs.findings }}
+
+runs:
+  using: "composite"
+  steps:
+    # One Trivy version for every caller, bumped here by hand (setup-trivy installs whatever it is
+    # given, and Dependabot does not see it). setup-trivy's cache stores only the Trivy binary,
+    # keyed by version, OS and architecture, never the vulnerability database, which Trivy
+    # downloads fresh on every run. It stays off: a release job then reads nothing another ref's
+    # run wrote and writes nothing others read, so the release keeps its own cache scope, at the
+    # price of a few seconds of download.
+    - name: Install Trivy
+      uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
+      with:
+        version: v0.75.0
+        cache: false
+
+    - name: Check the Trivy version
+      shell: bash
+      run: |
+        set -euo pipefail
+        # A wrong binary on PATH would scan with another version's rules and database schema.
+        got="$(trivy --version | sed -n 's/^Version: //p' | head -n1)"
+        if [[ "${got}" != 0.75.0 ]]; then
+          echo "::error::trivy --version reports '${got}', want 0.75.0. Nothing was scanned."
+          exit 1
+        fi
+        echo "Trivy ${got}"
+
+    - name: Scan the image
+      id: scan
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+        BASELINE_IMAGE: ${{ inputs.baseline-image }}
+        PLATFORMS: ${{ inputs.platform }}
+        SEVERITY: ${{ inputs.severity }}
+        IGNORE_UNFIXED: ${{ inputs.ignore-unfixed }}
+        IGNOREFILE: ${{ inputs.ignorefile }}
+        FORMAT: ${{ inputs.format }}
+        REPORT: ${{ inputs.report }}
+      run: |
+        set -euo pipefail
+        if [[ -n "${BASELINE_IMAGE}" ]]; then
+          "${GITHUB_ACTION_PATH}/scan-findings.sh" "${IMAGE}" "${BASELINE_IMAGE}"
+        else
+          "${GITHUB_ACTION_PATH}/scan-findings.sh" "${IMAGE}"
+        fi
