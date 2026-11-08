@@ -9,10 +9,12 @@ on:
       - main
   workflow_dispatch:
 
-# A newer push to a pull request cancels the older run. A push to main never cancels one: every
-# main commit keeps its own ci-result, which require-ci-green looks up per SHA.
 concurrency:
-  group: "${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}"
+  # A pull request's runs share one group per branch, so a newer push cancels the older run. Every
+  # other run (a push to main, a dispatch) gets a group of its own: GitHub keeps only one pending
+  # run per group, so a shared group would let a newer push replace a queued run, and every main
+  # commit must keep its own ci-result, which require-ci-green looks up per SHA.
+  group: "${{ github.workflow }} @ ${{ github.event_name == 'pull_request' && github.event.pull_request.head.label || github.run_id }}"
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Every job reads the repository and nothing else, unless it says otherwise below.
