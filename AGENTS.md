@@ -4,11 +4,11 @@
 
 Composite GitHub Actions shared by the `leinardi/*` repositories (`leinardi/gh-composite-actions/<action>@<sha>`):
 tool setup (`setup-svu`, `setup-shellcheck`, `setup-cargo-deny`, `setup-zigbuild`), release
-versioning (`release-version`), the CI-green release gate (`require-ci-green`), release recovery
-(`release-mode`, `binary-attestation-status`, `toolchain-record`, `toolchain-recover`), image
-checks (`trivy-gate`, `check-pinned-bases`) and cache pruning (`prune-caches`). Callers trust
-these with their releases: a gate that passes when it should not is the worst bug this repository
-can have.
+versioning (`release-version`), the CI-green release gate (`require-ci-green`), the same-run job
+gate (`require-job-success`), release recovery (`release-mode`, `binary-attestation-status`,
+`toolchain-record`, `toolchain-recover`), image checks (`trivy-gate`, `check-pinned-bases`) and
+cache pruning (`prune-caches`). Callers trust these with their releases: a gate that passes when it
+should not is the worst bug this repository can have.
 
 **Not here:** the pre-commit and reviewdog actions belong in
 [gha-pre-commit-reviewdog-actions](https://github.com/leinardi/gha-pre-commit-reviewdog-actions),
