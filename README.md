@@ -1,8 +1,9 @@
 # gh-composite-actions
 
 Composite GitHub Actions shared by the `leinardi/*` repositories: tool setup, release versioning,
-the CI-green release gate, image checks, toolchain records and cache pruning. Each action lives in
-its own top-level directory, with its own README, and is tested here before any repository uses it.
+the CI-green and same-run job gates, image checks, toolchain records and cache pruning. Each action
+lives in its own top-level directory, with its own README, and is tested here before any repository
+uses it.
 
 The pre-commit and reviewdog actions are not here: they live in
 [gha-pre-commit-reviewdog-actions](https://github.com/leinardi/gha-pre-commit-reviewdog-actions).
@@ -16,6 +17,7 @@ The reusable workflows that call these actions live in
 | [`setup-svu`](setup-svu/README.md) | Installs svu from its release archive, checked against a pinned SHA-256 (Linux X64 and ARM64) | none |
 | [`release-version`](release-version/README.md) | Resolves and validates the next release version and tag: explicit or derived by svu, strict `<prefix>X.Y.Z`, higher than every release, optional floor | `contents: read` |
 | [`require-ci-green`](require-ci-green/README.md) | Waits until `ci.yaml`'s `ci-result` job passed on one exact commit, for an accepted event and branch, in the newest attempt; fails closed otherwise | `actions: read` |
+| [`require-job-success`](require-job-success/README.md) | Waits until one job of the current workflow run passed in the current attempt (an earlier attempt's pass never counts); fails closed otherwise | `actions: read` |
 | [`release-mode`](release-mode/README.md) | Decides whether a release run is fresh, publishes, reuses or stops, per binary and platform, after verifying everything already published | `contents: read` (+ `packages: read`, `attestations: read` on private repositories) |
 | [`binary-attestation-status`](binary-attestation-status/README.md) | Lists the release files that still need a build-provenance attestation from the signer workflow | `contents: read` |
 | [`trivy-gate`](trivy-gate/README.md) | Scans an image with a pinned Trivy and fails on fixable findings, or only on findings a baseline image does not have | `contents: read` |

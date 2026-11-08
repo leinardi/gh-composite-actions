@@ -1,0 +1,56 @@
+---
+name: Require job success
+description: >-
+  Waits until one job of the current workflow run has concluded success in the current attempt,
+  and fails otherwise. Only the current attempt's execution of the job, with exactly that name,
+  decides; an earlier attempt's pass never counts, because a job missing from the API lists is
+  never trusted to mean "not re-run". After "Re-run failed jobs", re-run with "Re-run all jobs"
+  (or re-run the job too). Never changes anything. Needs actions: read.
+
+inputs:
+  job:
+    description: >-
+      The exact name of the job in this run that must conclude success (its name:, or its job key
+      when it has none).
+    required: true
+  interval:
+    description: Seconds between polls while the job has not started or not finished.
+    required: false
+    default: "10"
+  timeout:
+    description: Minutes to wait for the job to finish before failing. 0 checks once.
+    required: false
+    default: "30"
+  github-token:
+    description: The token used to read the run's jobs. It needs actions read.
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  job-id:
+    description: The id of the job that passed.
+    value: ${{ steps.check.outputs.job-id }}
+  job-url:
+    description: The web URL of the job that passed.
+    value: ${{ steps.check.outputs.job-url }}
+  job-attempt:
+    description: The run attempt whose job passed.
+    value: ${{ steps.check.outputs.job-attempt }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Wait for the job to pass
+      id: check
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        REPOSITORY: ${{ github.repository }}
+        RUN_ID: ${{ github.run_id }}
+        RUN_ATTEMPT: ${{ github.run_attempt }}
+        JOB: ${{ inputs.job }}
+        INTERVAL: ${{ inputs.interval }}
+        TIMEOUT: ${{ inputs.timeout }}
+      run: |
+        set -euo pipefail
+        "${GITHUB_ACTION_PATH}/require-job-success.sh"

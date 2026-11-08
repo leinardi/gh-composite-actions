@@ -407,6 +407,75 @@ jobs:
           sha: ${{ github.event.before }}
           timeout: "30"
 
+  # The job self-test-require-job-success waits for: it only has to succeed, beside it in the same
+  # run. Not needed by ci-result: the self-test fails when it does not.
+  self-test-require-job-success-target:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Succeed
+        run: echo "require-job-success waits for this job"
+
+  # No needs: on the target, the way a release job runs beside its audit job: the action itself
+  # waits for the target to be listed and to pass. Only the current attempt's target counts, so
+  # when this job fails, re-run the workflow with "Re-run all jobs": "Re-run failed jobs" does not
+  # re-run the passed target, and this job would wait for it until its timeout.
+  self-test-require-job-success:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # actions: read lists the run's jobs.
+    permissions:
+      contents: read
+      actions: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: A sibling job of this run that succeeds passes the gate
+        id: target
+        uses: ./require-job-success
+        with:
+          job: self-test-require-job-success-target
+          interval: "5"
+          timeout: "10"
+
+      - name: A job this run does not have fails closed
+        id: none
+        continue-on-error: true
+        uses: ./require-job-success
+        with:
+          job: no-such-job-${{ github.run_id }}
+          timeout: "0"
+
+      - name: A bad interval is refused
+        id: bad
+        continue-on-error: true
+        uses: ./require-job-success
+        with:
+          job: self-test-require-job-success-target
+          interval: "0"
+          timeout: "0"
+
+      # Only this attempt's execution of the target can pass the gate.
+      - name: Check the outputs and that both negatives failed
+        env:
+          JOB_ID: ${{ steps.target.outputs.job-id }}
+          JOB_URL: ${{ steps.target.outputs.job-url }}
+          JOB_ATTEMPT: ${{ steps.target.outputs.job-attempt }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          NONE: ${{ steps.none.outcome }}
+          BAD: ${{ steps.bad.outcome }}
+        run: |
+          set -euo pipefail
+          [[ "${JOB_ID}" =~ ^[0-9]+$ ]]
+          [[ "${JOB_URL}" == */job/"${JOB_ID}" ]]
+          test "${JOB_ATTEMPT}" = "${RUN_ATTEMPT}"
+          test "${NONE} ${BAD}" = "failure failure"
+
   self-test-binary-attestation-status:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -700,6 +769,7 @@ jobs:
       - self-test-release-version
       - self-test-prune-caches
       - self-test-require-ci-green
+      - self-test-require-job-success
       - self-test-binary-attestation-status
       - self-test-release-mode
       - self-test-check-pinned-bases
