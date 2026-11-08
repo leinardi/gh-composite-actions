@@ -45,7 +45,7 @@ in the Makefile.
 | `check-pinned-bases/fixtures/` | Dockerfile fixtures, including copies of the callers' real Dockerfiles |
 | `scripts/run-tests.sh` | `make test`: runs every tracked `*/*.test.sh` |
 | `.github/workflows/ci.yaml` | `pre-commit-all`, `script-tests`, one `self-test-*` job per action (`uses: ./<action>` on a real runner), `ci-result` |
-| `.github/workflows/release.yaml` | the **Release** workflow, on gh-reusable-workflows' `simple-tag-and-release`, which also moves `v1` |
+| `.github/workflows/release.yaml` | the **Release** workflow: dispatched, or on a Dependabot merge through gh-reusable-workflows' `dependabot-release`; publishes with `simple-tag-and-release`, which also moves `v1` |
 | `.github/workflows/pre-commit-warmup.yaml` | refreshes the pre-commit cache on `main` and prunes the older entries |
 | `scripts/check-license-headers.sh` | the MIT license-header check |
 | `.agents/skills/` | project skills; `.claude/skills` is a symlink to it |
