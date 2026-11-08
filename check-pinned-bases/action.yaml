@@ -18,6 +18,13 @@ inputs:
       They override the matching global ARG defaults, as they do in the build.
     required: false
     default: ""
+  tag-only-images:
+    description: >-
+      Registries or repositories, one per line (dhi.io, docker.io/library/docker), whose images may
+      be pinned by an explicit tag other than latest instead of a digest, for a base that is
+      rebuilt too often to follow by digest. Matched as written; a digest is still accepted.
+    required: false
+    default: ""
 
 runs:
   using: "composite"
@@ -27,6 +34,7 @@ runs:
       env:
         DOCKERFILES: ${{ inputs.dockerfiles }}
         BUILD_ARGS: ${{ inputs.build-args }}
+        TAG_ONLY_IMAGES: ${{ inputs.tag-only-images }}
       run: |
         set -euo pipefail
         "${GITHUB_ACTION_PATH}/check-pinned-bases.sh"
