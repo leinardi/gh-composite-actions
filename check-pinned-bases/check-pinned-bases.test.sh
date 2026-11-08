@@ -61,7 +61,7 @@ check() {
 	done
 	[[ $# -gt 0 ]] && shift
 	want="$(cat)"
-	got="$(cd "${here}" && env -u GITHUB_ACTIONS -u DOCKERFILES -u BUILD_ARGS "${assignments[@]}" \
+	got="$(cd "${here}" && env -u GITHUB_ACTIONS -u DOCKERFILES -u BUILD_ARGS -u TAG_ONLY_IMAGES "${assignments[@]}" \
 		bash "${script}" "$@" 2>"${work}/stderr")" || status=$?
 	if [[ ${status} -ne ${want_status} ]]; then
 		echo "not ok - ${name}: exit ${status}, want ${want_status}" >&2
@@ -81,7 +81,7 @@ check() {
 check_stderr() {
 	local name="$1" want_status="$2" want_text="$3" status=0 err
 	shift 3
-	err="$(cd "${here}" && env -u GITHUB_ACTIONS -u DOCKERFILES -u BUILD_ARGS "$@" bash "${script}" 2>&1 >/dev/null)" || status=$?
+	err="$(cd "${here}" && env -u GITHUB_ACTIONS -u DOCKERFILES -u BUILD_ARGS -u TAG_ONLY_IMAGES "$@" bash "${script}" 2>&1 >/dev/null)" || status=$?
 	if [[ ${status} -ne ${want_status} ]]; then
 		echo "not ok - ${name}: exit ${status}, want ${want_status}: ${err}" >&2
 		failures=$((failures + 1))
@@ -324,6 +324,45 @@ EOF
 
 check "herdquay, pinned and the apt key verified by sha256: passes" 0 \
 	-- fixtures/herdquay.pinned-verified.Dockerfile </dev/null
+
+# --- Tag-only images --------------------------------------------------------------------------
+
+tag_only() {
+	echo "$1: $2 may be pinned by tag only ($3 is in tag-only-images), but needs an explicit tag other than latest"
+}
+
+check "without --tag-only, every tag-only fixture image needs a digest" 1 \
+	-- fixtures/tag-only.Dockerfile <<EOF
+$(unpinned fixtures/tag-only.Dockerfile:2 "FROM dhi.io/rust:1.98.1-debian13-dev" dhi.io/rust:1.98.1-debian13-dev)
+$(unpinned fixtures/tag-only.Dockerfile:4 "FROM dhi.io/static" dhi.io/static)
+$(unpinned fixtures/tag-only.Dockerfile:5 "FROM dhi.io/static:latest" dhi.io/static:latest)
+$(unpinned fixtures/tag-only.Dockerfile:6 "FROM dhi.io.example.com/static:1" dhi.io.example.com/static:1)
+$(unpinned fixtures/tag-only.Dockerfile:7 "FROM docker.io/library/alpine:3.23" docker.io/library/alpine:3.23)
+$(unpinned fixtures/tag-only.Dockerfile:8 "FROM dhi.io/static:20250419" dhi.io/static:20250419)
+EOF
+
+check "--tag-only dhi.io: a dhi.io tag passes, untagged and latest do not, other registries need a digest" 1 \
+	-- --tag-only dhi.io/ fixtures/tag-only.Dockerfile <<EOF
+$(tag_only fixtures/tag-only.Dockerfile:4 "FROM dhi.io/static" dhi.io/static)
+$(tag_only fixtures/tag-only.Dockerfile:5 "FROM dhi.io/static:latest" dhi.io/static)
+$(unpinned fixtures/tag-only.Dockerfile:6 "FROM dhi.io.example.com/static:1" dhi.io.example.com/static:1)
+$(unpinned fixtures/tag-only.Dockerfile:7 "FROM docker.io/library/alpine:3.23" docker.io/library/alpine:3.23)
+EOF
+
+check "--tag-only names one repository: the others under its registry still need a digest" 1 \
+	-- --tag-only dhi.io/rust fixtures/tag-only.Dockerfile <<EOF
+$(unpinned fixtures/tag-only.Dockerfile:4 "FROM dhi.io/static" dhi.io/static)
+$(unpinned fixtures/tag-only.Dockerfile:5 "FROM dhi.io/static:latest" dhi.io/static:latest)
+$(unpinned fixtures/tag-only.Dockerfile:6 "FROM dhi.io.example.com/static:1" dhi.io.example.com/static:1)
+$(unpinned fixtures/tag-only.Dockerfile:7 "FROM docker.io/library/alpine:3.23" docker.io/library/alpine:3.23)
+$(unpinned fixtures/tag-only.Dockerfile:8 "FROM dhi.io/static:20250419" dhi.io/static:20250419)
+EOF
+
+check "awtrix-controller with TAG_ONLY_IMAGES=dhi.io: passes as it is" 0 \
+	DOCKERFILES=fixtures/awtrix-controller.Dockerfile "TAG_ONLY_IMAGES=$(printf '# DHI\n  dhi.io  \n\n')" </dev/null
+
+check_stderr "a tag-only entry with a tag fails" 2 "--tag-only 'dhi.io/static:1' is not a registry or repository" \
+	DOCKERFILES=fixtures/tag-only.Dockerfile TAG_ONLY_IMAGES=dhi.io/static:1
 
 # --- The wrapper's inputs -------------------------------------------------------------------
 

@@ -19,6 +19,15 @@ The first check covers every external image the build pulls:
 `scratch` and the earlier stages of the same file (by `AS` name, case-insensitively, or by index)
 are not external and pass.
 
+Some bases are rebuilt too often to follow by digest, such as Docker Hardened Images, whose digests
+move several times a week. The `tag-only-images` input lists registries or repositories (`dhi.io`,
+`docker.io/library/docker`) whose images may name an explicit tag instead: `dhi.io/static:20250419`
+passes, while `dhi.io/static` and `dhi.io/static:latest` do not. An entry matches its repository
+and everything under it (`dhi.io` matches `dhi.io/rust`, not `dhi.io.example.com/rust`), as
+written, with no `docker.io` normalisation. Such a base is not reproducible: two builds of the same
+commit can get different images, so the caller records the digest each build resolved, from its
+provenance, instead of asserting it.
+
 The second check is a heuristic for downloads: a `curl` or `wget` command, or an `ADD` of a URL,
 must be verified in the same instruction. The `RUN` script (line continuations and heredocs
 included) is split into simple commands, with quotes, comments and `$( )` understood, so a
@@ -61,6 +70,7 @@ heredocs, mixed-case keywords, `ONBUILD`, and exec-form `RUN`/`ADD`. Each findin
 | --- | --- | --- | --- |
 | `dockerfiles` | no | `Dockerfile` | The Dockerfiles, one path or bash glob (`**` included) per line, relative to the working directory. Every line must match at least one file; an empty value is an error, not the default. |
 | `build-args` | no | `""` | Build args, one `NAME=VALUE` per line, as `docker build --build-arg`. They override the matching global `ARG` defaults. |
+| `tag-only-images` | no | `""` | Registries or repositories, one per line, whose images may be pinned by an explicit tag other than `latest` instead of a digest. A digest is still accepted. |
 
 ## Outputs
 
@@ -87,4 +97,5 @@ has it) and no network.
       BASE_IMAGE=docker.io/library/ubuntu:26.04@sha256:<digest>
 ```
 
-Run it locally with `check-pinned-bases/check-pinned-bases.sh [--build-arg NAME=VALUE]... FILE...`.
+Run it locally with
+`check-pinned-bases/check-pinned-bases.sh [--build-arg NAME=VALUE]... [--tag-only REPOSITORY]... FILE...`.

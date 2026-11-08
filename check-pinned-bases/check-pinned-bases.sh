@@ -37,6 +37,9 @@
 #                it; set but blank is an error, never the default.
 #   BUILD_ARGS   newline-separated NAME=VALUE pairs, as docker build --build-arg; blank lines and
 #                lines starting with # are skipped.
+#   TAG_ONLY_IMAGES  newline-separated registries or repositories (dhi.io, docker.io/library/docker)
+#                whose images may be pinned by an explicit tag instead of a digest; blank lines and
+#                lines starting with # are skipped.
 #
 # Exit status: 0 when every file passes, 1 on any finding, 2 when an entry matches no file, a file
 # cannot be read or parsed, or a build arg is not NAME=VALUE.
@@ -110,5 +113,12 @@ while IFS= read -r pair; do
 	fi
 	arguments+=(--build-arg "${pair}")
 done <<<"${BUILD_ARGS:-}"
+
+while IFS= read -r prefix; do
+	prefix="${prefix##+([[:space:]])}"
+	prefix="${prefix%%+([[:space:]])}"
+	[[ -z ${prefix} || ${prefix} == \#* ]] && continue
+	arguments+=(--tag-only "${prefix}")
+done <<<"${TAG_ONLY_IMAGES:-}"
 
 exec python3 -I "${checker}" "${arguments[@]}" -- "${files[@]}"

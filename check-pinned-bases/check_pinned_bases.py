@@ -25,7 +25,7 @@
 # Checks that every external image a Dockerfile pulls is pinned by digest, and that every download
 # in it is verified:
 #
-#   check_pinned_bases.py [--build-arg NAME=VALUE]... DOCKERFILE...
+#   check_pinned_bases.py [--build-arg NAME=VALUE]... [--tag-only REPOSITORY]... DOCKERFILE...
 #
 # A tag can be moved to other content at any time; a digest cannot. So every image the build pulls
 # from outside the file must be named as <image>@sha256:<64 hex>: the base of each FROM, the image
@@ -36,6 +36,9 @@
 # cannot be resolved that way (no default and no --build-arg, declared only inside a stage, or a
 # platform ARG only the builder knows) is reported as an error at its line, never guessed. Platform
 # flags (--platform=$BUILDPLATFORM) are not part of the image reference and are ignored.
+#
+# --tag-only exempts a registry or repository (dhi.io, or dhi.io/rust) from the digest: its images
+# pass with an explicit tag other than latest, for bases rebuilt too often to follow by digest.
 #
 # The second check is a heuristic for downloads: a curl or wget command, or an ADD of a URL, must be
 # verified in the same instruction. The RUN script (its line continuations and heredocs included)
@@ -991,8 +994,9 @@ def unverified_downloads(script, errexit=False, pipefail=False):
 class Checker:
     """Checks one Dockerfile; collects (line, message) findings."""
 
-    def __init__(self, build_args):
+    def __init__(self, build_args, tag_only=()):
         self.build_args = build_args
+        self.tag_only = tuple(tag_only)
         self.findings = []
 
     def report(self, line, message):
@@ -1128,6 +1132,11 @@ class Checker:
         if "@" in resolved and not DIGEST_RE.search(resolved):
             self.report(line, f"{shown} has a malformed digest: want @sha256: and 64 lowercase "
                               "hex digits")
+        elif "@" not in resolved and is_tag_only(resolved, self.tag_only):
+            repository, tag = split_reference(resolved)
+            if not tag or tag == "latest":
+                self.report(line, f"{shown} may be pinned by tag only ({repository} is in "
+                                  "tag-only-images), but needs an explicit tag other than latest")
         elif not DIGEST_RE.search(resolved):
             where = ("" if written == resolved
                      else " where its value comes from (the ARG default or the build arg)")
@@ -1249,6 +1258,37 @@ def escape_annotation(text, is_property=False):
     return text
 
 
+def split_reference(reference):
+    """(repository, tag) of an image reference with no digest; tag is "" when it has none. A colon
+    after the last slash starts the tag; one before it is a registry port."""
+    slash = reference.rfind("/")
+    colon = reference.rfind(":")
+    if colon > slash:
+        return reference[:colon], reference[colon + 1:]
+    return reference, ""
+
+
+def is_tag_only(reference, prefixes):
+    """Whether the reference's repository is one of the tag-only entries, or under one: "dhi.io"
+    matches dhi.io/static, "dhi.io/rust" matches only that repository. Matched as written, with
+    no docker.io normalisation."""
+    repository, _ = split_reference(reference)
+    repository = repository.lower()
+    return any(repository == prefix or repository.startswith(prefix + "/")
+               for prefix in prefixes)
+
+
+def parse_tag_only(values):
+    prefixes = []
+    for value in values:
+        prefix = value.strip().lower().rstrip("/")
+        if not prefix or any(char in prefix for char in ":@ \t"):
+            raise ValueError(f"--tag-only {value!r} is not a registry or repository (no tag, no "
+                             "digest)")
+        prefixes.append(prefix)
+    return prefixes
+
+
 def parse_build_args(values):
     build_args = {}
     for value in values:
@@ -1269,10 +1309,14 @@ def main(argv):
                     "and every download is verified by checksum.")
     parser.add_argument("--build-arg", action="append", default=[], metavar="NAME=VALUE",
                         help="a build arg, as docker build --build-arg (repeatable)")
+    parser.add_argument("--tag-only", action="append", default=[], metavar="REPOSITORY",
+                        help="a registry or repository whose images may be pinned by tag only "
+                             "(repeatable)")
     parser.add_argument("dockerfiles", nargs="+", metavar="DOCKERFILE")
     arguments = parser.parse_args(argv)
     try:
         build_args = parse_build_args(arguments.build_arg)
+        tag_only = parse_tag_only(arguments.tag_only)
     except ValueError as error:
         print(f"check-pinned-bases: {error}", file=sys.stderr)
         return 2
@@ -1287,7 +1331,7 @@ def main(argv):
             print(f"check-pinned-bases: cannot read {path}: {error}. Nothing was checked.",
                   file=sys.stderr)
             return 2
-        checker = Checker(build_args)
+        checker = Checker(build_args, tag_only)
         try:
             checker.check_file(lines)
         except ParseError as error:
@@ -1307,7 +1351,9 @@ def main(argv):
     if total:
         print(f"check-pinned-bases: {total} finding(s) in {count} Dockerfile(s).", file=sys.stderr)
         return 1
-    print(f"check-pinned-bases: {count} Dockerfile(s) pin every external image by digest and "
+    pinned = ("by digest, or by tag where tag-only-images allows it," if tag_only
+              else "by digest")
+    print(f"check-pinned-bases: {count} Dockerfile(s) pin every external image {pinned} and "
           "verify every download.", file=sys.stderr)
     return 0
 
