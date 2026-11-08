@@ -59,7 +59,8 @@ in the Makefile.
 ## Conventions
 
 - Pin every action and reusable workflow by full commit SHA, with the version in a trailing comment
-  (`@<sha> # vX.Y.Z`), inside `action.yaml` files too: Dependabot scans `/` and `/*`.
+  (`@<sha> # vX.Y.Z`), inside `action.yaml` files too: Dependabot scans `/` (`chore(deps)`) and `/*`
+  (`fix(deps)`, since callers run those pins).
 - Give every workflow a top-level `permissions: contents: read`, and widen it only on the job that
   needs more. `persist-credentials: false` on every checkout.
 - Pass `${{ }}` expressions into `run:` scripts through `env:`, never inline them in the script.
