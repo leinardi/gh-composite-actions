@@ -549,6 +549,32 @@ jobs:
           test "${FINDINGS}" = 0
           jq -e '.SchemaVersion == 2' "${REPORT}" >/dev/null
 
+      # The default installs the latest release; a pinned one must be the one that runs.
+      - name: A pinned Trivy version is the one that scans
+        id: pinned
+        uses: ./trivy-gate
+        with:
+          trivy-version: 0.75.0
+          image: docker.io/library/alpine:3.23
+          baseline-image: docker.io/library/alpine:3.23
+          platform: linux/amd64
+
+      - name: A version that is neither latest nor X.Y.Z is refused
+        id: bad-version
+        continue-on-error: true
+        uses: ./trivy-gate
+        with:
+          trivy-version: "0.75"
+          image: docker.io/library/alpine:3.23
+
+      - name: Check the pinned scan ran and the bad version failed
+        env:
+          PINNED: ${{ steps.pinned.outputs.findings }}
+          BAD: ${{ steps.bad-version.outcome }}
+        run: |
+          set -euo pipefail
+          test "${PINNED} ${BAD}" = "0 failure"
+
   self-test-setup-tools:
     runs-on: ubuntu-latest
     timeout-minutes: 10

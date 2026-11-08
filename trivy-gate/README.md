@@ -1,9 +1,10 @@
 # trivy-gate
 
-Installs Trivy 0.75.0 (through `aquasecurity/setup-trivy`, pinned by SHA) and scans an image for
-vulnerabilities. The gate fails on any finding at the given severities (default `HIGH,CRITICAL`),
-after the findings with no fix upstream (`ignore-unfixed`, on by default) and the exceptions in
-`.trivyignore.yaml` (when that file exists) are left out.
+Installs Trivy, its latest release unless `trivy-version` pins one (through
+`aquasecurity/setup-trivy`, pinned by SHA), and scans an image for vulnerabilities. The gate fails
+on any finding at the given severities (default `HIGH,CRITICAL`), after the findings with no fix
+upstream (`ignore-unfixed`, on by default) and the exceptions in `.trivyignore.yaml` (when that file
+exists) are left out.
 
 With `baseline-image`, the image the scanned one was built on, both are scanned the same way on
 one platform, and only the findings the image **adds** to the baseline fail the gate. A finding
@@ -18,11 +19,11 @@ no exceptions, the default path).
 
 Nothing else decides what the gate sees. Trivy would otherwise load `./.trivyignore` when no
 `--ignorefile` is given, `./trivy.yaml` when no `--config` is given, and any `TRIVY_*` variable
-(`TRIVY_SEVERITY`, `TRIVY_IGNOREFILE`, `TRIVY_SKIP_*`, …). So both flags are always passed (an
-empty value disables the file, per Trivy 0.75.0's flag definitions), and every `TRIVY_*` variable
-is removed from Trivy's environment except the registry credentials `TRIVY_USERNAME`,
-`TRIVY_PASSWORD` and `TRIVY_REGISTRY_TOKEN`; the removed names are listed in a notice. A mirror
-set through `TRIVY_DB_REPOSITORY` is removed too.
+(`TRIVY_SEVERITY`, `TRIVY_IGNOREFILE`, `TRIVY_SKIP_*`, …). So both flags are always passed (an empty
+value disables the file, per Trivy's flag definitions since at least 0.75.0), and every `TRIVY_*`
+variable is removed from Trivy's environment except the registry credentials `TRIVY_USERNAME`,
+`TRIVY_PASSWORD` and `TRIVY_REGISTRY_TOKEN`; the removed names are listed in a notice. A mirror set
+through `TRIVY_DB_REPOSITORY` is removed too.
 
 The scanned image's full report is written in the chosen format to `report`. The gate always
 reads Trivy's JSON; other formats are converted from it with `trivy convert`.
@@ -31,6 +32,7 @@ reads Trivy's JSON; other formats are converted from it with `trivy convert`.
 
 | Name | Required | Default | Description |
 | --- | --- | --- | --- |
+| `trivy-version` | no | `latest` | The Trivy release: `latest`, so every scan runs the newest checks, or `X.Y.Z`/`vX.Y.Z` to pin one. |
 | `image` | yes |  | The image to scan, best by digest (`registry/name@sha256:…`). |
 | `platform` | no | `""` | The one platform to scan (`os/arch[/variant]`) of a multi-platform image. Required with `baseline-image`. Empty: Trivy picks the runner's platform. |
 | `baseline-image` | no | `""` | The image the scanned one was built on, best by digest. Set: only the findings it does not carry fail. |
