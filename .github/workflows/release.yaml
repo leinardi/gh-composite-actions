@@ -11,15 +11,40 @@ on:
         description: "Dry run: resolve the version and print the plan, change nothing"
         type: boolean
         default: false
+  # A Dependabot merge that leaves only Dependabot's pin bumps unreleased releases a patch on its
+  # own (gh-reusable-workflows' dependabot-release.md).
+  push:
+    branches:
+      - main
 
 permissions:
   contents: read
 
+# Push runs hold one group for the whole workflow, so a Dependabot release picks its version and
+# publishes it before the next push's run picks one. Never cancelled; a newer push may replace a
+# waiting run, whose commits it covers. A dispatch runs on its own.
+concurrency:
+  group: "${{ github.event_name == 'push' && format('release-flow-{0}', github.repository) || github.run_id }}"
+  cancel-in-progress: false
+
 jobs:
+  dependabot:
+    if: github.event_name == 'push'
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read
+    uses: leinardi/gh-reusable-workflows/.github/workflows/dependabot-release.yaml@a577815ff6293be5d00aac56156a4d21afc58a4d # v1.6.0
+
   release:
+    needs: dependabot
+    # A dispatch skips the dependabot job; always() keeps this job from being skipped with it.
+    if: >-
+      always()
+      && (github.event_name == 'workflow_dispatch' || needs.dependabot.outputs.release == 'true')
     permissions:
       contents: write
-    uses: leinardi/gh-reusable-workflows/.github/workflows/simple-tag-and-release.yaml@ba5f6ec7596a5eb306ad2f7511a888ec8dde6d53 # v1.4.0
+    uses: leinardi/gh-reusable-workflows/.github/workflows/simple-tag-and-release.yaml@a577815ff6293be5d00aac56156a4d21afc58a4d # v1.6.0
     with:
-      version: ${{ inputs.version }}
-      dry_run: ${{ inputs.dry_run }}
+      version: ${{ github.event_name == 'workflow_dispatch' && inputs.version || needs.dependabot.outputs.version }}
+      dry_run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}

@@ -52,3 +52,9 @@ first release needs an explicit version, since there is no tag to derive it from
 which creates the `vX.Y.Z` tag and the release with generated notes, and moves `vMAJOR` and `latest`
 when it is the highest release. A failed run is finished by re-running it: it completes what the
 earlier attempt left behind.
+
+Merging a Dependabot pull request that bumps a shipped pin (`fix(deps)`) releases the next patch on
+its own, through the same workflow, when nothing else is unreleased, the change only moves existing
+action pins and CI passes on the merge. With other work unreleased, it leaves a notice and the
+release to you. See
+[`dependabot-release`](https://github.com/leinardi/gh-reusable-workflows/blob/main/.github/workflows/dependabot-release.md).
