@@ -1,11 +1,9 @@
 version: 2
 
 updates:
-  # The workflows and every action's action.yaml (each action sits in its own top-level directory).
+  # The repository's own workflows: nothing here ships, so a bump does not release.
   - package-ecosystem: "github-actions"
-    directories:
-      - "/"
-      - "/*"
+    directory: "/"
     schedule:
       interval: "monthly"
     # Wait a week after a release before proposing it (GitHub's default is
@@ -17,6 +15,23 @@ updates:
       prefix: "chore(deps)"
     groups:
       github-actions:
+        patterns:
+          - "*"
+
+  # Every action's action.yaml (each action sits in its own top-level directory). Callers run
+  # these pins, so a bump is a fix(deps) that releases. The `/*` glob covers a new action too.
+  - package-ecosystem: "github-actions"
+    directories:
+      - "/*"
+    schedule:
+      interval: "monthly"
+    cooldown:
+      default-days: 7
+    labels: ["dependencies", "ci"]
+    commit-message:
+      prefix: "fix(deps)"
+    groups:
+      github-actions-shipped:
         patterns:
           - "*"
 
