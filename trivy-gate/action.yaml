@@ -1,11 +1,18 @@
 name: Trivy gate
 description: >-
-  Installs a pinned Trivy and scans an image for vulnerabilities, failing on any finding at the
+  Installs Trivy (its latest release, unless a version is given) and scans an image for
+  vulnerabilities, failing on any finding at the
   given severities after the unfixed ones and the committed exceptions are left out. Given a
   baseline image (the base it was built on), it fails only on the findings the image adds to that
   baseline, and reports the inherited ones as a warning.
 
 inputs:
+  trivy-version:
+    description: >-
+      The Trivy release to install: latest (the default, so every scan runs the newest checks) or
+      a version, X.Y.Z or vX.Y.Z, to pin one.
+    required: false
+    default: latest
   image:
     description: >-
       The image to scan: a reference Trivy can pull or find locally, best by digest
@@ -69,29 +76,56 @@ outputs:
 runs:
   using: "composite"
   steps:
-    # One Trivy version for every caller, bumped here by hand (setup-trivy installs whatever it is
-    # given, and Dependabot does not see it). setup-trivy's cache stores only the Trivy binary,
-    # keyed by version, OS and architecture, never the vulnerability database, which Trivy
-    # downloads fresh on every run. It stays off: a release job then reads nothing another ref's
-    # run wrote and writes nothing others read, so the release keeps its own cache scope, at the
-    # price of a few seconds of download.
-    - name: Install Trivy
-      uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
-      with:
-        version: v0.75.0
-        cache: false
-
-    - name: Check the Trivy version
+    # latest, or a strict version given with or without its v, as setup-trivy wants it (vX.Y.Z).
+    - name: Check the Trivy version input
+      id: version
       shell: bash
+      env:
+        TRIVY_VERSION_INPUT: ${{ inputs.trivy-version }}
       run: |
         set -euo pipefail
-        # A wrong binary on PATH would scan with another version's rules and database schema.
-        got="$(trivy --version | sed -n 's/^Version: //p' | head -n1)"
-        if [[ "${got}" != 0.75.0 ]]; then
-          echo "::error::trivy --version reports '${got}', want 0.75.0. Nothing was scanned."
+        want="${TRIVY_VERSION_INPUT#v}"
+        if [[ "${TRIVY_VERSION_INPUT}" == latest ]]; then
+          echo "setup=latest" >>"${GITHUB_OUTPUT}"
+        elif [[ "${want}" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+          echo "setup=v${want}" >>"${GITHUB_OUTPUT}"
+        else
+          echo "::error::trivy-version '${TRIVY_VERSION_INPUT}' is neither latest nor X.Y.Z. Nothing was scanned."
           exit 1
         fi
-        echo "Trivy ${got}"
+
+    # setup-trivy's cache stores only the Trivy binary, keyed by version, OS and architecture, never
+    # the vulnerability database, which Trivy downloads fresh on every run, and it never caches
+    # latest. It stays off: a release job then reads nothing another ref's run wrote and writes
+    # nothing others read, so the release keeps its own cache scope, at the price of a few seconds
+    # of download.
+    - name: Install Trivy
+      id: install
+      uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
+      with:
+        version: ${{ steps.version.outputs.setup }}
+        cache: false
+
+    - name: Check the Trivy binary
+      shell: bash
+      env:
+        TRIVY_VERSION_INPUT: ${{ steps.version.outputs.setup }}
+      run: |
+        set -euo pipefail
+        # A wrong binary on PATH would scan with another version's rules and database schema: the
+        # one setup-trivy installed (into ~/.local/bin/trivy-bin) must be first, and a pinned version
+        # must be the one it reports.
+        found="$(command -v trivy || true)"
+        if [[ "${found}" != "${HOME}/.local/bin/trivy-bin/trivy" ]]; then
+          echo "::error::trivy on PATH is '${found:-missing}', not the one setup-trivy installed. Nothing was scanned."
+          exit 1
+        fi
+        got="$(trivy --version | sed -n 's/^Version: //p' | head -n1)"
+        if [[ "${TRIVY_VERSION_INPUT}" != latest && "${got}" != "${TRIVY_VERSION_INPUT#v}" ]]; then
+          echo "::error::trivy --version reports '${got}', want ${TRIVY_VERSION_INPUT#v}. Nothing was scanned."
+          exit 1
+        fi
+        echo "Trivy ${got} (trivy-version: ${TRIVY_VERSION_INPUT})"
 
     - name: Scan the image
       id: scan
