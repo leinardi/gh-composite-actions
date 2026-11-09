@@ -94,16 +94,23 @@ TIMEOUT="${TIMEOUT-30}"
 [[ "${TIMEOUT}" =~ ^(0|[1-9][0-9]*)$ ]] || die "timeout '${TIMEOUT}' is not a whole number of minutes"
 
 # One API call. Prints the response; stops the run on any error, with gh's own message (which
-# carries the HTTP status) and on any body that is not a JSON object.
+# carries the HTTP status) and on any body that is not a JSON object. A 5xx answer, or the empty body
+# GitHub sometimes sends with one, is tried again, three tries in all, 5 s apart: GitHub's job
+# lists answer 502 now and then. A 5xx on every try still stops the run.
 api() {
-	local out err
+	local out err msg try
 	err="$(mktemp)"
-	if ! out="$(gh api -H 'Accept: application/vnd.github+json' "$1" 2>"${err}")"; then
-		local msg
+	for ((try = 1; ; try++)); do
+		out="$(gh api -H 'Accept: application/vnd.github+json' "$1" 2>"${err}")" && break
 		msg="$(tr '\n' ' ' <"${err}")"
+		if ((try < 3)) && [[ "${msg}" =~ HTTP\ 5[0-9][0-9]|unexpected\ end\ of\ JSON\ input ]]; then
+			note "the GitHub API call $1 failed (${msg% }), trying again in 5 s"
+			sleep 5
+			continue
+		fi
 		rm -f "${err}"
 		die "the GitHub API call $1 failed: ${msg:-no message}"
-	fi
+	done
 	rm -f "${err}"
 	jq -e 'type == "object"' >/dev/null 2>&1 <<<"${out}" || die "the GitHub API call $1 returned malformed JSON"
 	printf '%s\n' "${out}"

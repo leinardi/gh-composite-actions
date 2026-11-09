@@ -32,7 +32,9 @@ file, the action fails.
 
 **Failing:** any other conclusion fails at once: `failure`, `cancelled`, `skipped`, `timed_out`,
 `action_required`, `neutral`, `stale` or `startup_failure`. So does a missing or duplicated job,
-any API error (403, 404, 5xx) and any malformed response. The message says which.
+any API error (403, 404, a 5xx that persists) and any malformed response. The message says which.
+A 5xx answer, or an empty error body, is tried again first: three tries in all, 5 s apart, since
+GitHub's job lists answer 502 now and then.
 
 ## `accepted-events` syntax
 
