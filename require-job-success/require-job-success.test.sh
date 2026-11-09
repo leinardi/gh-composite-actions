@@ -32,7 +32,7 @@
 #   poll-<n>/all-<page>.json          runs/{id}/jobs?filter=all on poll n (no file: an empty list)
 #
 # A fixture whose first line is "ERROR <message>" makes gh fail with that message, the way gh
-# reports an HTTP error. A missing page is an empty list. date and sleep share a fake clock, so
+# reports an HTTP error; a first line "ONCE <message>" does so once, and is then dropped. A missing page is an empty list. date and sleep share a fake clock, so
 # the timeout runs out in no real time.
 #
 # Run: bash require-job-success/require-job-success.test.sh
@@ -75,6 +75,11 @@ answer() {
 	fi
 	if [[ "$(head -n1 "${dir}/$1")" == ERROR* ]]; then
 		sed -n '1s/^ERROR //p' "${dir}/$1" >&2
+		exit 1
+	fi
+	if [[ "$(head -n1 "${dir}/$1")" == ONCE* ]]; then
+		sed -n '1s/^ONCE //p' "${dir}/$1" >&2
+		sed -i 1d "${dir}/$1"
 		exit 1
 	fi
 	cat "${dir}/$1"
@@ -538,6 +543,41 @@ fixture
 jobs attempt-1-1.json 1 "${filler[@]}"
 raw 1 attempt-1-2.json "ERROR gh: HTTP 502"
 expect_fail "an error on page 2 fails closed" "HTTP 502"
+
+# --- retries ----------------------------------------------------------------------------------
+
+# flaky POLL FILE MESSAGE: the fixture FILE of poll POLL fails once with MESSAGE, then answers.
+flaky() {
+	local file="${case_dir}/poll-$1/$2"
+	{ printf 'ONCE %s\n' "$3"; cat "${file}"; } >"${file}.new"
+	mv "${file}.new" "${file}"
+}
+
+# calls_to PATTERN: how many API calls matched the extended regex PATTERN.
+calls_to() {
+	grep -cE "$1" "${case_dir}/calls" || true
+}
+
+fixture
+jobs attempt-1-1.json 1 "$(job)"
+flaky 1 attempt-1-1.json "gh: Server Error (HTTP 502)"
+expect_pass "a 502 on the jobs list is tried again" 100 1
+expect_true "retry: the jobs list was asked twice" test "$(calls_to '/attempts/1/jobs')" = 2
+
+fixture
+jobs attempt-1-1.json 1 "$(job)"
+flaky 1 attempt-1-1.json "unexpected end of JSON input"
+expect_pass "an empty error body is tried again" 100 1
+
+fixture
+raw 1 attempt-1-1.json "ERROR gh: Server Error (HTTP 503)"
+expect_fail "a 5xx on every try fails closed" "HTTP 503"
+expect_true "retry: three tries in all" test "$(calls_to '/attempts/1/jobs')" = 3
+
+fixture
+raw 1 attempt-1-1.json "ERROR gh: Forbidden (HTTP 403)"
+expect_fail "a 4xx is not tried again" "HTTP 403"
+expect_true "retry: a 4xx is asked once" test "$(calls_to '/attempts/1/jobs')" = 1
 
 # --- bad inputs -------------------------------------------------------------------------------
 
