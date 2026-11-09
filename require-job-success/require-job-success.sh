@@ -120,7 +120,9 @@ list_all() {
 		body="$(api "${url}${sep}per_page=100&page=${page}")"
 		items="$(jq -c --arg f "${field}" '.[$f] | if type == "array" then . else error("no array") end' \
 			<<<"${body}" 2>/dev/null)" || die "the GitHub API call ${url} (page ${page}) has no ${field} array"
-		all="$(jq -c --argjson more "${items}" '. + $more' <<<"${all}")"
+		# Both arrays go through stdin: a page of runs or jobs can be larger than the 128 KiB a
+		# single command-line argument may hold, which --argjson would need.
+		all="$(jq -cs '.[0] + .[1]' <<<"${all}"$'\n'"${items}")"
 		count="$(jq 'length' <<<"${items}")"
 		((count == 100)) || break
 		page=$((page + 1))

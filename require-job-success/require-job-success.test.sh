@@ -519,6 +519,16 @@ jobs attempt-1-2.json 1 "$(job)"
 expect_pass "a job on page 2 is found" 100 1
 expect_true "pagination: page 2 was read" grep -q 'page=2$' "${case_dir}/calls"
 
+# Real jobs carry their steps and are several KiB each, so a full page is larger than one
+# command-line argument may be (128 KiB): the pages must be joined without passing one as an
+# argument.
+pad="$(printf 'x%.0s' {1..2000})"
+mapfile -t big < <(for i in $(seq 1000 1099); do job "{\"id\":${i},\"name\":\"build-${i}\",\"pad\":\"${pad}\"}"; done)
+fixture
+jobs attempt-1-1.json 1 "${big[@]}"
+jobs attempt-1-2.json 1 "$(job)"
+expect_pass "a page larger than one argument may be is read" 100 1
+
 fixture
 jobs attempt-1-1.json 1 "${filler[@]::99}" "$(job)"
 jobs attempt-1-2.json 1 "$(job '{"id":101,"conclusion":"failure"}')"
