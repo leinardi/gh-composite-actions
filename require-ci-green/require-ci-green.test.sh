@@ -541,6 +541,16 @@ runs 1 1 "${filler[@]}"
 raw 1 runs-2.json "ERROR gh: HTTP 502"
 expect_fail "an error on page 2 fails closed" "HTTP 502"
 
+# Real runs are several KiB each, so a full page is larger than one command-line argument may be
+# (128 KiB): the pages must be joined without passing one as an argument.
+pad="$(printf 'x%.0s' {1..2000})"
+mapfile -t big < <(for i in $(seq 100 199); do run "{\"id\":${i},\"run_number\":${i},\"path\":\".github/workflows/other.yaml\",\"pad\":\"${pad}\"}"; done)
+fixture
+runs 1 1 "${big[@]}"
+runs 1 2 "$(run '{"id":7}')"
+jobs 1 7 1 "$(job)"
+expect_pass "a page larger than one argument may be is read" 7 1
+
 # --- bad inputs -------------------------------------------------------------------------------
 
 fixture
