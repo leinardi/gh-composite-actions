@@ -34,7 +34,7 @@ jobs:
       contents: read
       pull-requests: read
       actions: read
-    uses: leinardi/gh-reusable-workflows/.github/workflows/dependabot-release.yaml@a577815ff6293be5d00aac56156a4d21afc58a4d # v1.6.0
+    uses: leinardi/gh-reusable-workflows/.github/workflows/dependabot-release.yaml@83b67e285a75505ff27d4ce827235335b8101527 # v1.6.1
 
   release:
     needs: dependabot
@@ -44,7 +44,7 @@ jobs:
       && (github.event_name == 'workflow_dispatch' || needs.dependabot.outputs.release == 'true')
     permissions:
       contents: write
-    uses: leinardi/gh-reusable-workflows/.github/workflows/simple-tag-and-release.yaml@a577815ff6293be5d00aac56156a4d21afc58a4d # v1.6.0
+    uses: leinardi/gh-reusable-workflows/.github/workflows/simple-tag-and-release.yaml@83b67e285a75505ff27d4ce827235335b8101527 # v1.6.1
     with:
       version: ${{ github.event_name == 'workflow_dispatch' && inputs.version || needs.dependabot.outputs.version }}
       dry_run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
